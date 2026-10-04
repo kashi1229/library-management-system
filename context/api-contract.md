@@ -1,0 +1,91 @@
+# API Contract
+
+Base path `/api`. JSON only. Envelope: `{ success, data, meta? }` or `{ success:false, error:{ code, message, fields? } }`.
+Error codes: `UNAUTHENTICATED(401) FORBIDDEN(403) NOT_FOUND(404) VALIDATION(422) CONFLICT(409) RULE_VIOLATION(400) RATE_LIMITED(429) INTERNAL(500)`.
+Pagination query: `page` (default 1), `limit` (default 12, max 100). `meta: { page, limit, total, totalPages }`.
+Roles: **P** public, **M** member+, **S** staff (librarian|admin), **A** admin.
+
+## Auth
+| Method | Path | Role | Purpose |
+|---|---|---|---|
+| POST | /auth/register | P | Create member; set session cookie |
+| POST | /auth/login | P | Verify credentials; set cookie; rate-limited (5 attempts / 10 min / IP+email, in-memory) |
+| POST | /auth/logout | M | Clear cookie |
+| GET | /auth/me | M | Current user (safe fields) |
+| PATCH | /auth/password | M | Change own password (current + new) |
+
+## Profile & Uploads
+| PATCH | /profile | M | Update name, phone, department, avatar `{url,publicId}` (old avatar deleted from Cloudinary) |
+| POST | /uploads/sign | S for `covers`, M for `avatars` | Body `{ folder: 'covers'|'avatars' }` → `{ signature, timestamp, apiKey, cloudName, folder }` |
+| DELETE | /uploads | S/M (owner-checked) | Body `{ publicId }` remove asset |
+
+## Categories
+| GET | /categories | P | List with `bookCount` |
+| POST | /categories | S | Create |
+| PATCH | /categories/:id | S | Update |
+| DELETE | /categories/:id | S | Delete (blocked if books exist) |
+
+## Books
+| GET | /books | P | Query: `q, category, language, availability(available|all), yearFrom, yearTo, sort(newest|title|popular|rating), status(S only), page, limit` |
+| GET | /books/:slugOrId | P | Detail + `effectiveAvailable`, `queueLength`, rating summary; adds `userState` (wishlisted, activeLoan, reservation) if signed in |
+| GET | /books/:id/related | P | Same category, excluding self (max 6) |
+| POST | /books | S | Create (availableCopies = totalCopies) |
+| PATCH | /books/:id | S | Update (copy-count rule enforced) |
+| POST | /books/:id/archive | S | Archive / restore (`{ archived: boolean }`) |
+| DELETE | /books/:id | S | Hard delete if never loaned |
+| POST | /books/bulk-archive | S | `{ ids[] }` |
+
+## Members & Team
+| GET | /members | S | Query `q, status, page, limit` (role=member) |
+| GET | /members/:id | S | Detail + summaries |
+| GET | /members/lookup | S | `q` → up to 8 lightweight results for the circulation search |
+| POST | /members/:id/suspend | S | `{ reason }` |
+| POST | /members/:id/activate | S | |
+| POST | /members/:id/reset-password | S for members, A for librarians | Returns temporary password once |
+| GET | /team | A | List librarians/admins |
+| POST | /team | A | Create librarian |
+| PATCH | /team/:id | A | Update name/status (cannot demote/disable self) |
+
+## Circulation
+| GET | /loans | S | Filters: `status(active|returned|overdue|due_soon), memberId, bookId, from, to, page` |
+| GET | /loans/mine | M | Own loans, filter `status` |
+| POST | /loans/issue | S | `{ memberId, bookId, notes? }` |
+| POST | /loans/:id/return | S | Returns loan + fine (if any) |
+| POST | /loans/:id/renew | M (own) / S | |
+
+## Reservations
+| GET | /reservations/mine | M | |
+| GET | /reservations | S | Filters `status, bookId` |
+| POST | /reservations | M | `{ bookId }` |
+| DELETE | /reservations/:id | M (own) / S | Cancel |
+| POST | /reservations/:id/fulfil | S | Issues the book from a *ready* reservation |
+
+## Fines
+| GET | /fines/mine | M | List + `outstandingTotal` |
+| GET | /fines | S | Filters `status, memberId, from, to`; with totals |
+| POST | /fines/:id/collect | S | `{ paymentMethod, note? }` |
+| POST | /fines/:id/waive | S | `{ reason }` |
+
+## Wishlist & Reviews
+| GET | /wishlist | M | |
+| POST | /wishlist | M | `{ bookId }` toggle-safe (idempotent add) |
+| DELETE | /wishlist/:bookId | M | |
+| GET | /books/:id/reviews | P | Paginated |
+| POST | /books/:id/reviews | M | Create or update own `{ rating, comment }` |
+| DELETE | /reviews/:id | M (own) / S | |
+
+## Notifications
+| GET | /notifications | M | `unreadOnly, page`; `meta.unreadCount` |
+| POST | /notifications/:id/read | M | |
+| POST | /notifications/read-all | M | |
+
+## Dashboard, Reports, Audit, Settings, Maintenance
+| GET | /dashboard/member | M | KPIs, active loans, ready holds, recommendations |
+| GET | /dashboard/staff | S | KPIs, 30-day loans series, by-category, top books, recent activity, low-stock |
+| GET | /public/stats | P | Books / members / loans counts + new arrivals for landing page (cached 60s) |
+| GET | /reports/:type | S | `type`: `borrowing|overdue|popular|members|fines|inventory`; filters `from,to,categoryId`; `format=csv` returns text/csv |
+| GET | /audit | A | Filters `actor, action, from, to, page` |
+| GET | /settings/public | P | Safe subset: libraryName, loanPeriodDays, maxActiveLoans, maxRenewals, finePerDay, currencySymbol, reservationHoldHours (created in Unit 12) |
+| GET | /settings | A | Full settings |
+| PATCH | /settings | A | Validates numeric ranges |
+| POST | /maintenance/run | A or `x-cron-secret` header | Returns counts of work done |

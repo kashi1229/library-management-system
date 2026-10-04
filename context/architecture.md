@@ -1,0 +1,119 @@
+# Architecture
+
+## Stack
+
+| Layer | Technology | Role |
+|---|---|---|
+| Framework | Next.js 15 (App Router), React 19 | Pages, layouts, route handlers, server components |
+| Language | TypeScript (strict) | Type safety everywhere |
+| Styling | Tailwind CSS v4 + CSS variables | Token-driven theming (light/dark) |
+| UI primitives | shadcn/ui (Radix UI) | Accessible dialog, dropdown, select, tabs, tooltip, sheet |
+| Icons | lucide-react | The only icon library |
+| Animation | framer-motion | Page transitions, list stagger, micro-interactions |
+| Fonts | next/font (Fraunces, Inter, JetBrains Mono) | Display, body, mono |
+| Database | MongoDB Atlas | Primary data store |
+| ODM | Mongoose 8 | Schemas, validation, indexes, transactions |
+| File storage | Cloudinary | Book covers and avatars (signed uploads) |
+| Auth | jose (JWT) + bcryptjs + httpOnly cookie | Stateless sessions, hashed passwords |
+| Validation | zod | Single source of truth for request validation (client + server) |
+| Forms | react-hook-form + @hookform/resolvers | Typed forms with zod |
+| Data fetching | Server Components for reads; `fetch` + SWR-style hook (`swr`) for interactive client lists | Fast initial load, snappy filtering |
+| Toasts | sonner | Feedback |
+| Charts | recharts | Dashboard and report charts |
+| Dates | date-fns | Formatting and date math |
+| Theme | next-themes | Light / dark / system |
+| Hosting | Vercel (app) + Atlas (db) + Cloudinary (media) | Free tiers sufficient |
+
+## System Boundaries (folder ownership)
+
+```
+src/
+├── app/
+│   ├── (marketing)/            landing page only
+│   ├── (auth)/                 login, register
+│   ├── (public)/catalog/       public catalog + book detail
+│   ├── (member)/               dashboard, my-loans, reservations, wishlist, fines, notifications, profile
+│   ├── staff/                  all staff pages (layout enforces librarian|admin)
+│   └── api/                    route handlers ONLY — thin: auth → validate → call service → respond
+├── components/
+│   ├── ui/                     shadcn primitives (generated; do not hand-edit unless a spec says so)
+│   ├── common/                 shared building blocks (PageHeader, EmptyState, DataTable, StatCard, ConfirmDialog, BookCover, StatusBadge…)
+│   ├── layout/                 AppShell, Sidebar, Topbar, MobileNav, ThemeToggle, NotificationBell
+│   └── features/<feature>/     feature-specific components (books, loans, members, …)
+├── lib/
+│   ├── db.ts                   cached Mongo connection
+│   ├── auth/                   jwt sign/verify, cookie helpers, getSession, requireRole
+│   ├── cloudinary.ts           server config + signature helper
+│   ├── validators/             zod schemas (one file per domain)
+│   ├── services/               ALL business logic (circulation, fines, reservations, notifications, audit, reports, settings, maintenance)
+│   ├── api.ts                  response helpers, error classes, handler wrapper
+│   ├── constants.ts            enums, roles, nav config, route lists
+│   └── utils.ts                cn(), formatters
+├── models/                     Mongoose models (one file per collection)
+├── hooks/                      client hooks (useDebounce, useCurrentUser, useNotifications…)
+├── middleware.ts               coarse route protection (cookie presence + role claim)
+└── types/                      shared TypeScript types
+scripts/seed.ts                 seed script (spec in unit 21)
+```
+
+**Rule of thumb:** UI never talks to Mongoose. API routes never contain business logic. Services never read `Request`/`Response`.
+
+## Storage Model
+
+| Data | Where |
+|---|---|
+| Users, books, categories, loans, fines, reservations, wishlist, reviews, notifications, audit logs, settings | MongoDB |
+| Book cover images, avatar images | Cloudinary (`athenaeum/covers`, `athenaeum/avatars`). MongoDB stores `{ url, publicId }` only |
+| Session | Signed JWT in httpOnly, SameSite=Lax, Secure (prod) cookie named `athenaeum_session` |
+| Theme preference | next-themes (localStorage) |
+| Nothing else | No Redis, no queues, no external cache |
+
+## Auth & Access Model
+- JWT payload: `{ sub: userId, role, name }`, 7-day expiry, signed HS256 with `JWT_SECRET`.
+- `middleware.ts` does coarse gating: unauthenticated → `/login?next=…` for `(member)` and `/staff` routes; non-staff hitting `/staff/*` → redirect `/dashboard`; signed-in user hitting `/login` or `/register` → redirect to their home.
+- **Real enforcement is server-side**: every route handler calls `requireSession()` / `requireRole([...])`, and re-loads the user from the DB to confirm `status` and current `role` (never trust the token alone for privileged actions).
+- Members can only read/modify their own loans, fines, reservations, wishlist, notifications, profile. Ownership is checked in services using the session user id, never an id from the request body.
+- Suspended users: may sign in and read; blocked from reserving, renewing, and being issued books. Wishlist and profile edits remain allowed.
+
+## Business Rules (authoritative)
+
+All values below are read from the `Setting` singleton.
+
+1. **Issue a loan** — all must hold, else a typed error with a human message:
+   - Member exists, role `member`, status `active`.
+   - Book exists, status `active`, `availableCopies > 0`, after subtracting copies reserved as *ready* for other members.
+   - Member's active loans `< maxActiveLoans`.
+   - Member has no active loan of this same book.
+   - Member's unpaid fines total `≤ fineBlockThreshold`.
+   - If the member has a *ready* reservation for the book, issuing fulfils it (status `fulfilled`, linked to the loan).
+   - Effect (single transaction): create loan (`dueDate = now + loanPeriodDays`), `book.availableCopies -= 1`, `book.borrowCount += 1`, audit, notification.
+2. **Return a loan** — loan must be `active`. Effect (transaction): set `returnedAt`, `status=returned`, `receivedBy`; `book.availableCopies += 1`; compute fine (`ceil((returnedAt - dueDate)/1 day) × finePerDay`, capped, only if late); create Fine; call `promoteReservationQueue(bookId)`; audit; notifications.
+3. **Renew** — loan `active`, not overdue, `renewCount < maxRenewals`, member `active`, **no waiting/ready reservations by other members** on the book. Effect: `dueDate += renewalExtensionDays`, `renewCount += 1`, audit.
+4. **Overdue** is *derived*: `status === 'active' && dueDate < now`. It is never stored as a status; queries use the derived condition.
+5. **Reserve** — member `active`; `availableCopies − readyHolds == 0` (otherwise tell them to visit the desk); no existing waiting/ready reservation by this member for the book; no active loan of the book; member active reservations `< 3`.
+6. **Promote queue** — after any return or reservation expiry/cancel of a ready hold: if free copies exist and a `waiting` reservation exists, oldest becomes `ready`, `readyAt=now`, `expiresAt=now+reservationHoldHours`, notify member. A *ready* reservation consumes one copy from public availability (computed `effectiveAvailable = availableCopies − readyCount`).
+7. **Expire** — `ready` reservations past `expiresAt` become `expired`, then queue promotes again.
+8. **Fine lifecycle** — `unpaid → paid` (collect) or `unpaid → waived` (waive, reason required). Terminal states cannot change.
+9. **Reviews** — only if the member has ≥1 loan (any status) of the book. After write, recompute `ratingAvg`/`ratingCount` on the book.
+10. **Book deletion** — only if the book has zero loans ever; otherwise archive. `totalCopies` cannot be set below `(totalCopies − availableCopies)` (copies out on loan).
+11. **Category deletion** — blocked if any book references it.
+
+## Maintenance Job (no cron required)
+`runMaintenance()` in `services/maintenance.ts`: (1) expire ready reservations and promote queues; (2) create `due_soon` notifications for loans due within 2 days; (3) create `overdue` notifications for overdue loans. Idempotent: uses a `dedupeKey` (`type:loanId:YYYY-MM-DD`) unique on notifications. Triggered by: admin button, `POST /api/maintenance/run` (with `CRON_SECRET` header, usable by Vercel Cron), and lazily on staff dashboard load (throttled to once per 10 minutes via a `lastMaintenanceAt` stored in Settings).
+
+## Invariants (rules the codebase must NEVER violate)
+
+1. **No business logic in route handlers or components.** All rules live in `lib/services/*`.
+2. **Every API route authenticates and authorises first**, using `requireSession`/`requireRole`, before touching data.
+3. **Ownership is derived from the session**, never from client-supplied user ids (except staff acting on a member through an explicit `memberId` that is role-checked).
+4. **All inputs are validated with zod** before reaching a service. Services assume typed, validated input but re-check business rules.
+5. **Multi-document changes (issue, return, reserve-promote, review rating recompute) run in a Mongo transaction.** `availableCopies` must never go negative or exceed `totalCopies`.
+6. **`availableCopies` is only changed by circulation services** (issue/return) and book total-copy edits. Never from the UI or generic update endpoints.
+7. **Policy numbers come from Settings**, never hard-coded.
+8. **Passwords and `passwordHash` never leave the server.** Every user query used in responses uses a safe projection (`-passwordHash`).
+9. **Secrets (`CLOUDINARY_API_SECRET`, `JWT_SECRET`) never reach the client.** Uploads use server-signed parameters; the client only receives signature, timestamp, folder.
+10. **Deletes of history are forbidden**: loans, fines, audit logs are never deleted.
+11. **Audit logging is mandatory** for: user create/suspend/activate/password-reset, book create/update/archive/delete, issue/return/renew, fine collect/waive, reservation fulfil/cancel by staff, settings change.
+12. **All dates are stored as UTC `Date`**; formatting happens in the UI. "Days overdue" is computed with date-fns `differenceInCalendarDays`.
+13. **UI uses only design tokens** from `ui-context.md` (no raw hex values in components) and **only lucide-react icons**.
+14. **API responses follow one envelope**: `{ success: true, data, meta? }` or `{ success: false, error: { code, message, fields? } }`.
