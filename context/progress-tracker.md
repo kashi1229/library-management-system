@@ -3,12 +3,12 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth and app shell.** Units 01–05 complete. Units 06 → 21 in progress
-  per the developer's instruction to complete the application rather than pause for review per unit.
+- **Phase 1 — Foundation, backend, auth, shell and profile.** Units 01–06 complete. Units 07 → 21 in
+  progress per the developer's instruction to complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 06 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- Next unit: **06 — Cloudinary & Profile**.
+- Build Units 07 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- Next unit: **07 — Categories**.
 
 ## Completed
 
@@ -100,14 +100,44 @@ Update this file after every meaningful implementation change.
   banner renders · anonymous requests to all six protected route families redirect to `/login` ·
   user menu shows identity and membership ID.
 
-## In Progress
-- Unit 06 — Cloudinary & Profile.
-
 ## Next Up
-1. **06** Cloudinary & Profile → **07** Categories → **08** Books → **09** Public Catalog →
+1. **07** Categories → **08** Books → **09** Public Catalog →
    **10** Members & Team → **11/12** Circulation → **13** Fines → **14** Reservations →
    **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards → **18** Reports & Audit →
    **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
+
+### Unit 06 — Cloudinary Uploads & Profile ✅
+- **Module split** (documented in `architecture.md`, must not be merged):
+  `lib/cloudinary-shared.ts` is client-safe (no `server-only`, no SDK); `lib/cloudinary.ts` is server-only
+  and lazily `await import("cloudinary")` for `signUpload` / `destroyAsset`. Merging them, or importing
+  the server module from a Client Component, fails the build — a loud failure that prevents shipping
+  `CLOUDINARY_API_SECRET` to the browser.
+- `signUpload()` signs `timestamp`, `folder`, `allowed_formats` **and `max_file_size`**, so the client
+  cannot widen the constraints. Upload endpoint is rate-limited to 30/hour per user per folder.
+- `POST /api/uploads/sign` — zod enum folder whitelist; `covers` requires staff (403 for members).
+- `DELETE /api/uploads` — staff may delete `athenaeum/covers/*` (detaching it from any referencing book
+  first, with an audit entry); a member may delete **only their own current avatar**, verified against the
+  database. Both branches are audited.
+- `PATCH /api/profile` — read-only fields (email, membership ID, role, status) are absent from the schema
+  and assigned one-by-one, so zod key-stripping plus explicit assignment blocks mass assignment.
+- `ImageUploader` — dashed drop zone, drag-over highlight, instant blob preview, determinate progress bar
+  via `XMLHttpRequest` (the only browser API that reports upload progress), success tick, remove with
+  confirm. MIME **and** extension **and** size validated client-side as a fast UX check.
+- Profile page — two columns (identity card + avatar / Details & Security tabs), read-only fields shown
+  behind a lock with the reason, strength meter on the new-password field, `/profile` reachable by every
+  role with the shell variant chosen from the role.
+- **Security review (agent)**: no CRITICAL/HIGH findings. Confirmed blocked — crafted `publicId`
+  deletion, member cover upload, `..` traversal, signature widening, SDK/secret in the bundle, NoSQL
+  injection, mass assignment, secret/stack-trace leakage. Fixed during the pass:
+  - **MEDIUM** — avatar `url` was client-controlled and rendered to other users via a raw `<img>`;
+    now **derived server-side from the `publicId`**, removing the attack surface entirely.
+  - **LOW** — added a rate limit to signing; added audit entries to both delete branches; derived the
+    covers prefix from `folderPath()` instead of a literal.
+- **Verified in headless Chrome**: 64/64 checks · **0 console errors, 0 page errors, 0 failed requests** ·
+  360/768/1280 × light/dark · CLS 0.0000 · no overflow · all four `/api/profile` + `/api/uploads` routes
+  reject anonymous calls · non-image and >3MB files rejected with a clear message · `accept` excludes SVG
+  · membership ID rendered in mono · Details/Security tabs switch · three password fields present ·
+  **`CLOUDINARY_API_SECRET` / `api_secret` / `apiSecret` absent from every client bundle and the HTML**.
 
 ## Bugs Found and Fixed by Browser QA
 Recording these because they were invisible to `tsc`, `eslint` and `next build`:
@@ -120,13 +150,34 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - **Sidebar collapse did nothing visually** — `AppShell` hard-coded `w-[264px]` on the `<aside>`, so the
   rail collapsed *inside* a fixed box. Fixed by lifting the preference into a `SidebarState` context that
   both `AppShell` and `Sidebar` read.
+- **`server-only` leaked into the client bundle** — `ImageUploader` imported `UPLOAD_LIMITS` and
+  `withTransform` from the server module, dragging in the SDK and failing on `fs`. Fixed by the
+  `cloudinary-shared` / `cloudinary` split above.
+- **Every upload would have failed with `Invalid Signature`** — `max_file_size` was signed but never sent.
+  Caught by the security-review agent, not by any compiler.
+- **A newly uploaded avatar was never persisted** — `onChange` only touched client state and the next
+  server refresh clobbered it, leaving the API's avatar branch as dead code. Now calls `profileApi.update`.
+- **A revoked blob URL latched forever** — `preview` was set once and never cleared, so after the first
+  upload the preview pointed at a dead object URL and masked the real image.
+
+## In Progress
+- Unit 07 — Categories.
 
 ## Open Questions
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
 - Default currency (default USD, editable in Settings).
-- `MONGODB_URI` and `JWT_SECRET` must be supplied in `.env.local` before the API can be exercised
-  end-to-end. Units 03–04 are therefore verified structurally and in the browser, but the live
-  register → login → redirect round trip still needs a real database.
+- `MONGODB_URI`, `JWT_SECRET` and the three `CLOUDINARY_*` values must be in `.env.local` before the
+  API can be exercised end to end. Units 03–06 are verified structurally and in the browser, but the
+  live register → login → upload round trip needs a real database **and** real Cloudinary credentials.
+- Confirmed against the spec: **suspended members may still edit their profile and avatar.**
+  `architecture.md` §Auth & Access Model says "Wishlist and profile edits remain allowed", and
+  `requireActiveMember()` is reserved for reserve / renew / issue. `PATCH /api/profile` therefore uses
+  `requireSession()`, not `requireActiveMember()` — intentional, not an oversight.
+- The project has **no test files**. `project-overview.md` scopes automated suites out, but the Unit 06
+  pass found two HIGH bugs (broken signature, avatar never persisted) that any test would have caught.
+  Worth revisiting at Unit 21.
+- The browser QA harness lives outside the repo in `%LOCALAPPDATA%\Temp\opencode\qa` (puppeteer-core plus
+  the installed Chrome), so no QA dependency is added to the project.
 
 ## Architecture Decisions
 - Next.js 16 App Router (scaffold) + Mongoose 9 + Cloudinary signed uploads + jose JWT cookie sessions.
@@ -148,7 +199,7 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - `feat/02-database-models` — Units 02 **and 03** (Unit 03's commit landed here before the branch was
   switched; both units are complete and verified, so history was left intact rather than rewritten).
 - `feat/04-auth-ui` — Unit 04.
-- `feat/05-app-shell` — Unit 05 onward.
+- `feat/05-app-shell` — Units 05 and 06 (Unit 06's commit followed Unit 05 on the same branch).
 
 ## Session Notes
 - Start every session by reading `CLAUDE.md`, then all files it lists, then the current unit spec.

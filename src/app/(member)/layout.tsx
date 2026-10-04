@@ -35,8 +35,13 @@ export default async function MemberLayout({ children }: { children: React.React
 
   if (!full) redirect("/login");
 
+  // `/profile` is reachable by every role, so pick the shell that matches the
+  // visitor — a librarian checking their profile keeps the staff navigation
+  // instead of being dropped into the member shell.
+  const variant = full.role === "librarian" || full.role === "admin" ? "staff" : "member";
+
   return (
-    <AppShell user={toPublicUser(full)} variant="member" libraryName={settings?.libraryName}>
+    <AppShell user={toPublicUser(full)} variant={variant} libraryName={settings?.libraryName}>
       {children}
     </AppShell>
   );

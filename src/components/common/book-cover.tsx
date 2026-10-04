@@ -1,8 +1,8 @@
-import * as React from "react";
+﻿import * as React from "react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { CATEGORY_COLOR_CLASS, type CategoryColor } from "@/lib/constants";
-import { cloudinaryUrl } from "@/lib/cloudinary";
+import { cloudinaryUrl } from "@/lib/cloudinary-shared";
 
 type BookCoverProps = {
   /** Cloudinary public id for the uploaded cover. */
@@ -14,7 +14,7 @@ type BookCoverProps = {
   author?: string | null;
   /** Drives the fallback gradient and accent bar. */
   categoryColor?: CategoryColor | string | null;
-  /** Rendered width in px — keeps `next/image` from guessing. */
+  /** Rendered width in px â€” keeps `next/image` from guessing. */
   width?: number;
   className?: string;
   /** Accessible label; defaults to the book title. */

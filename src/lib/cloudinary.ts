@@ -1,70 +1,129 @@
+import "server-only";
+
 /**
- * Cloudinary URL builder.
+ * Server-only Cloudinary operations: upload signing and asset deletion.
  *
- * Unit 01 ships this as a pure, network-free string builder so `next/image` can be
- * pointed at Cloudinary immediately. Signed uploads (signature helper) arrive in
- * Unit 06, together with the `CLOUDINARY_*` env plumbing.
+ * Invariant 9: `CLOUDINARY_API_SECRET` never reaches the client. The browser
+ * receives only a short-lived signature, a timestamp, the API key, the cloud name
+ * and the target folder.
  *
- * Usage:
- *   cloudinaryUrl("athenaeum/covers/abc", { width: 640, height: 960 })
- *   → https://res.cloudinary.com/<cloud>/image/upload/f_auto,q_auto,w_640,h_640/<publicId>
+ * The SDK is imported **lazily inside the functions**, and every client-safe
+ * helper lives in `cloudinary-shared.ts`. That split is what keeps Node built-ins
+ * (`fs`) and the credentials out of the browser bundle: a Client Component may
+ * import `cloudinary-shared` freely but importing this file would fail the build
+ * rather than silently ship a secret.
  */
 
-export const CLOUDINARY_UPLOAD_BASE = "https://res.cloudinary.com";
+import { folderPath, UPLOAD_LIMITS, type CloudinaryFolder, type SignedUploadParams } from "@/lib/cloudinary-shared";
 
-export type CloudinaryTransform = {
-  /** Cloud name. Defaults to `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME`. */
-  cloudName?: string;
-  width?: number;
-  height?: number;
-  /** Output format hint passed through to Cloudinary's `f_` (usually "auto"). */
-  format?: string;
-  /** JPEG/WebP quality 1–100 via `q_`. Defaults to "auto". */
-  quality?: string | number;
-  /** Gravity passed to `g_`; used with `crop: "fill"` for square avatars. */
-  gravity?: string;
-  crop?: "fill" | "fit" | "limit" | "thumb";
+type CloudinaryConfig = {
+  cloudName: string;
+  apiKey: string;
+  apiSecret: string;
 };
 
-type CloudinaryImage = { url: string; publicId?: string | null } | null | undefined;
+/** Read credentials from the environment, failing loudly when they are absent. */
+function config(): CloudinaryConfig {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
 
-/** Trim slashes so callers can pass `covers/x` or `/covers/x` interchangeably. */
-function normalizePublicId(publicId: string): string {
-  return publicId.replace(/^\/+/, "");
+  const missing = [
+    !cloudName && "CLOUDINARY_CLOUD_NAME",
+    !apiKey && "CLOUDINARY_API_KEY",
+    !apiSecret && "CLOUDINARY_API_SECRET",
+  ].filter(Boolean);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Cloudinary is not configured. Missing: ${missing.join(", ")}. Copy .env.example to .env.local.`,
+    );
+  }
+
+  return { cloudName: cloudName as string, apiKey: apiKey as string, apiSecret: apiSecret as string };
 }
 
 /**
- * Build a transformed delivery URL. Returns an empty string for missing input so
- * callers can fall back to a generated cover without extra null checks.
+ * Produce signed upload parameters for a folder.
+ *
+ * Every value the signature covers is returned so the client can echo them back
+ * unchanged — Cloudinary rejects the upload otherwise. `max_file_size` and
+ * `allowed_formats` are **signed**, so the client cannot widen them: a 10MB or
+ * `.svg` upload is refused by Cloudinary even if the client-side check is bypassed.
  */
-export function cloudinaryUrl(
-  publicId: string | null | undefined,
-  { cloudName, width, height, format = "auto", quality = "auto", gravity, crop }: CloudinaryTransform = {},
-): string {
-  const cloud = cloudName ?? process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-  const id = publicId?.trim();
-  if (!cloud || !id) return "";
+export async function signUpload(folder: CloudinaryFolder): Promise<SignedUploadParams> {
+  const { cloudName, apiKey, apiSecret } = config();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const limits = UPLOAD_LIMITS[folder];
+  const maxFileSizeBytes = limits.maxSizeMB * 1024 * 1024;
 
-  const parts = [`f_${format}`, `q_${quality}`];
-  if (width) parts.push(`w_${Math.round(width)}`);
-  if (height) parts.push(`h_${Math.round(height)}`);
-  if (gravity) parts.push(`g_${gravity}`);
-  parts.push(`c_${crop ?? (width && height ? "fill" : "limit")}`);
+  const { v2 } = await import("cloudinary");
 
-  return `${CLOUDINARY_UPLOAD_BASE}/${cloud}/image/upload/${parts.join(",")}/${normalizePublicId(id)}`;
+  const signature = v2.utils.api_sign_request(
+    {
+      timestamp,
+      folder: folderPath(folder),
+      allowed_formats: limits.formats.join(","),
+      max_file_size: maxFileSizeBytes,
+    },
+    apiSecret,
+  );
+
+  return {
+    signature,
+    timestamp,
+    apiKey,
+    cloudName,
+    folder: folderPath(folder),
+    allowedFormats: limits.formats.join(","),
+    maxFileSizeBytes,
+  };
 }
 
-/** Convenience wrapper for the `{ url, publicId }` image shape stored in MongoDB. */
-export function cloudinaryImageUrl(
-  image: CloudinaryImage,
-  transform?: CloudinaryTransform,
-): string {
-  if (!image) return "";
-  return image.url?.trim() ? image.url : cloudinaryUrl(image.publicId, transform);
+/**
+ * Delete an uploaded asset.
+ *
+ * Best-effort by design: a stale Cloudinary asset is harmless, so a failure must
+ * never fail the database write that replaced the reference. The error is logged
+ * and `false` returned.
+ */
+export async function destroyAsset(publicId: string): Promise<boolean> {
+  if (!publicId) return false;
+
+  try {
+    const { v2 } = await import("cloudinary");
+    const { cloudName, apiKey, apiSecret } = config();
+
+    v2.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret, secure: true });
+
+    const result = await v2.uploader.destroy(publicId, { invalidate: true });
+    return result.result === "ok" || result.result === "not found";
+  } catch (error) {
+    console.error("[cloudinary] Failed to destroy asset", { publicId }, error);
+    return false;
+  }
 }
 
-/** Cover thumbnails are 2:3 and capped at 512px wide. */
-export const COVER_TRANSFORM = { width: 512, height: 768 } as const;
+// Re-exported so server modules have a single import site.
+export {
+  ALLOWED_FORMATS,
+  CLOUDINARY_API_BASE,
+  CLOUDINARY_PREFIX,
+  CLOUDINARY_UPLOAD_BASE,
+  UPLOAD_LIMITS,
+  cloudinaryImageUrl,
+  cloudinaryUrl,
+  folderPath,
+  isOwnedAsset,
+  uploadEndpoint,
+  withTransform,
+  AVATAR_TRANSFORM,
+  COVER_TRANSFORM,
+} from "@/lib/cloudinary-shared";
 
-/** Avatars are square, face-focused crops. */
-export const AVATAR_TRANSFORM = { width: 256, height: 256, gravity: "auto", crop: "fill" } as const;
+export type {
+  CloudinaryFolder,
+  CloudinaryImage,
+  CloudinaryTransform,
+  SignedUploadParams,
+} from "@/lib/cloudinary-shared";

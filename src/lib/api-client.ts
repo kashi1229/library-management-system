@@ -1,7 +1,7 @@
 import type { NextResponse } from "next/server";
 import type { ApiFailure, ApiSuccess } from "@/lib/api";
 import type { FieldErrors } from "@/lib/api";
-import type { PublicUser } from "@/types";
+import type { CloudinaryImage, PublicUser } from "@/types";
 
 /**
  * Typed client for the API.
@@ -107,6 +107,46 @@ export const authApi = {
 
   changePassword: (input: { currentPassword: string; newPassword: string; confirmPassword: string }) =>
     request<{ changed: boolean }>("/auth/password", { method: "PATCH", body: input }),
+};
+
+/* -------------------------------------------------------------------------- */
+/* Profile & uploads                                                           */
+/* -------------------------------------------------------------------------- */
+
+export const profileApi = {
+  me: (signal?: AbortSignal) => request<{ user: PublicUser }>("/profile", { signal }),
+
+  /**
+   * `avatar` is tri-state: an object replaces it, `null` removes it, and
+   * omitting the key leaves it untouched.
+   */
+  update: (input: {
+    name: string;
+    phone?: string;
+    department?: string;
+    avatar?: CloudinaryImage | null;
+  }) => request<{ user: PublicUser }>("/profile", { method: "PATCH", body: input }),
+};
+
+export type SignedUpload = {
+  signature: string;
+  timestamp: number;
+  apiKey: string;
+  cloudName: string;
+  folder: string;
+  allowedFormats: string;
+  maxFileSizeBytes: number;
+};
+
+export const uploadsApi = {
+  sign: (folder: "covers" | "avatars") =>
+    request<SignedUpload>("/uploads/sign", { method: "POST", body: { folder } }),
+
+  remove: (publicId: string) =>
+    request<{ deleted: boolean; removed: boolean }>("/uploads", {
+      method: "DELETE",
+      body: { publicId },
+    }),
 };
 
 /* -------------------------------------------------------------------------- */

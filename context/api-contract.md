@@ -16,8 +16,12 @@ Roles: **P** public, **M** member+, **S** staff (librarian|admin), **A** admin.
 
 ## Profile & Uploads
 | PATCH | /profile | M | Update name, phone, department, avatar `{url,publicId}` (old avatar deleted from Cloudinary) |
-| POST | /uploads/sign | S for `covers`, M for `avatars` | Body `{ folder: 'covers'|'avatars' }` → `{ signature, timestamp, apiKey, cloudName, folder }` |
-| DELETE | /uploads | S/M (owner-checked) | Body `{ publicId }` remove asset |
+| GET | /profile | M | Own record, safe fields |
+| POST | /uploads/sign | S for `covers`, M for `avatars` | Body `{ folder: 'covers'\|'avatars' }` → `{ signature, timestamp, apiKey, cloudName, folder, allowedFormats, maxFileSizeBytes }` |
+| DELETE | /uploads | S/M (owner-checked) | Body `{publicId}` remove asset |
+
+> **The avatar `url` is derived server-side** from the `publicId`; the client-supplied `url` is ignored.
+> Clients must echo back every signed field (including `max_file_size`) when POSTing to Cloudinary.
 
 ## Categories
 | GET | /categories | P | List with `bookCount` |

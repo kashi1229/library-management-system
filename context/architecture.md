@@ -40,6 +40,33 @@
   land with the first form-bearing unit (04).
 - `turbopack.root` is pinned in `next.config.ts` because this project sits inside a larger git repository.
 
+### Cloudinary module split (required, do not merge)
+
+| Module | `server-only`? | Cloudinary SDK? | Imported by |
+|---|---|---|---|
+| `lib/cloudinary-shared.ts` | no | no | Client Components (`ImageUploader`, `BookCover`) **and** server routes |
+| `lib/cloudinary.ts` | yes | lazy `await import("cloudinary")` | Server routes only — `signUpload`, `destroyAsset` |
+
+Client Components may import **only** `cloudinary-shared`. Merging them, or importing `@/lib/cloudinary`
+from a `"use client"` file, fails the build with *"`server-only` cannot be imported from a Client
+Component"* / *"Can't resolve 'fs'"*. A loud build failure is the intended safety net — the alternative
+would be silently shipping `CLOUDINARY_API_SECRET` to the browser.
+
+### Image upload contract
+
+1. Client validates MIME type **and** extension and the size cap (fast UX check only).
+2. `POST /api/uploads/sign` returns `{ signature, timestamp, apiKey, cloudName, folder, allowedFormats,
+   maxFileSizeBytes }`. `folder` is a zod enum whitelist; `covers` additionally requires a staff role.
+3. The client POSTs the file straight to Cloudinary with `XMLHttpRequest` (the only browser API that
+   reports upload progress), echoing **every signed field with the same name and value** — including
+   `max_file_size`. Omitting a signed field makes Cloudinary reject the upload.
+4. `max_file_size` and `allowed_formats` are inside the signature, so the client **cannot widen them**.
+5. `PATCH /api/profile` **derives the delivery URL from the `publicId` on the server** and ignores any
+   client-supplied `url`. The avatar URL is rendered to other users (staff see it at the desk), so a
+   client-controlled URL would be a stored cross-user content/tracking primitive.
+6. `DELETE /api/uploads` — staff may delete `athenaeum/covers/*` (detaching it from any book first, and
+   writing an audit entry); a member may delete **only their own current avatar**.
+
 ## System Boundaries (folder ownership)
 
 ```
@@ -89,8 +116,7 @@ scripts/seed.ts                 seed script (spec in unit 21)
 | Data | Where |
 |---|---|
 | Users, books, categories, loans, fines, reservations, wishlist, reviews, notifications, audit logs, settings | MongoDB |
-| Book cover images, avatar images | Cloudinary (`athenaeum/covers`, `athenaeum/avatars`). MongoDB stores `{ url, publicId }` only |
-| Session | Signed JWT in httpOnly, SameSite=Lax, Secure (prod) cookie named `athenaeum_session` |
+| Book cover images, avatar images | Cloudinary (`athenaeum/covers`, `athenaeum/avatars`). MongoDB stores `{ url, publicId }` only || Session | Signed JWT in httpOnly, SameSite=Lax, Secure (prod) cookie named `athenaeum_session` |
 | Theme preference | next-themes (localStorage) |
 | Nothing else | No Redis, no queues, no external cache |
 
