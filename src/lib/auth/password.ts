@@ -1,0 +1,28 @@
+import "server-only";
+import bcrypt from "bcryptjs";
+
+/**
+ * Password hashing (bcrypt, cost 10 per `project-overview.md` F1).
+ *
+ * Wrapped in one module so the cost factor is defined in exactly one place and
+ * `passwordHash` never has to be handled by a caller.
+ */
+
+const BCRYPT_COST = 10;
+
+/** Hash a plaintext password. */
+export function hashPassword(plain: string): Promise<string> {
+  return bcrypt.hash(plain, BCRYPT_COST);
+}
+
+/**
+ * Compare a plaintext candidate against a stored hash.
+ * Returns `false` rather than throwing on a malformed hash.
+ */
+export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
+  try {
+    return await bcrypt.compare(plain, hash);
+  } catch {
+    return false;
+  }
+}
