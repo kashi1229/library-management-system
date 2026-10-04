@@ -41,9 +41,14 @@
   --warning: #c98a1b;
   --warning-soft: #f9eed8;
   --danger: #b4412f;
+  --danger-foreground: #ffffff;
   --danger-soft: #f8e5e1;
   --info: #3b6e8f;
   --info-soft: #e4eef4;
+
+  /* Floating surfaces (dialog, sheet, popover, dropdown, select, tooltip) */
+  --popover: #ffffff;
+  --popover-foreground: #1c1917;
 
   /* --- Radius --------------------------------------------------------- */
   --radius-xs: 4px;
@@ -106,9 +111,14 @@
   --warning: #e3a93a;
   --warning-soft: #2e2517;
   --danger: #e8705d;
+  --danger-foreground: #1a0f0c;
   --danger-soft: #331e1a;
   --info: #6fa6c8;
   --info-soft: #1a262e;
+
+  /* --- Floating surfaces ---------------------------------------------- */
+  --popover: #232019;
+  --popover-foreground: #f2ede4;
 
   /* --- Elevation: borders + surface lightening instead of shadow ------- */
   --shadow-soft: 0 0 0 1px rgb(255 255 255 / 0.04);
@@ -146,9 +156,13 @@
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
   --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
   --color-danger-soft: var(--danger-soft);
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
 
   --color-cat-forest: var(--cat-forest);
   --color-cat-terracotta: var(--cat-terracotta);
