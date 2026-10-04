@@ -46,6 +46,16 @@
   --info: #3b6e8f;
   --info-soft: #e4eef4;
 
+  /* --- Status "ink" (text + icons ON the matching -soft tint) ---------
+     The raw status colours only reach ~2.5–3.2:1 on their own soft tint,
+     which fails WCAG 2.2 AA (4.5:1 text, 3:1 graphics). The -ink pair is the
+     AA-safe foreground for tinted badges, alerts and icon circles. */
+  --accent-ink: #8f4a24;
+  --success-ink: #226646;
+  --warning-ink: #8a5e0f;
+  --danger-ink: #9e3722;
+  --info-ink: #2e5a76;
+
   /* Floating surfaces (dialog, sheet, popover, dropdown, select, tooltip) */
   --popover: #ffffff;
   --popover-foreground: #1c1917;
@@ -116,6 +126,13 @@
   --info: #6fa6c8;
   --info-soft: #1a262e;
 
+  /* --- Status ink, light on dark tints -------------------------------- */
+  --accent-ink: #e8a67c;
+  --success-ink: #7fd3b0;
+  --warning-ink: #f0c463;
+  --danger-ink: #f5a08c;
+  --info-ink: #9ccbe6;
+
   /* --- Floating surfaces ---------------------------------------------- */
   --popover: #232019;
   --popover-foreground: #f2ede4;
@@ -150,16 +167,21 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
 
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
+  --color-success-ink: var(--success-ink);
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
+  --color-warning-ink: var(--warning-ink);
   --color-danger: var(--danger);
   --color-danger-foreground: var(--danger-foreground);
   --color-danger-soft: var(--danger-soft);
+  --color-danger-ink: var(--danger-ink);
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
+  --color-info-ink: var(--info-ink);
 
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);

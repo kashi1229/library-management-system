@@ -173,6 +173,53 @@ export const ROLE_HOME: Record<Role, string> = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Navigation config (placeholder structure — rendered by Unit 05 App Shell)     */
+/* -------------------------------------------------------------------------- */
+
+export type NavItemConfig = {
+  label: string;
+  href: string;
+  /** Lucide icon name, resolved in Unit 05. */
+  icon: string;
+  /** Minimum role required to see this entry. */
+  roles: readonly Role[];
+};
+
+/**
+ * Icon names follow ui-context.md §Navigation Items. Stored as strings so this
+ * module stays free of JSX and can be imported by Server Components.
+ */
+export const MEMBER_NAV: readonly NavItemConfig[] = [
+  { label: "Dashboard", href: ROUTES.member.dashboard, icon: "LayoutDashboard", roles: ["member", "librarian", "admin"] },
+  { label: "Catalog", href: ROUTES.catalog, icon: "Library", roles: ["member", "librarian", "admin"] },
+  { label: "My Loans", href: ROUTES.member.loans, icon: "BookMarked", roles: ["member", "librarian", "admin"] },
+  { label: "Reservations", href: ROUTES.member.reservations, icon: "Clock", roles: ["member", "librarian", "admin"] },
+  { label: "Wishlist", href: ROUTES.member.wishlist, icon: "Heart", roles: ["member", "librarian", "admin"] },
+  { label: "Fines", href: ROUTES.member.fines, icon: "Receipt", roles: ["member", "librarian", "admin"] },
+  { label: "Notifications", href: ROUTES.member.notifications, icon: "Bell", roles: ["member", "librarian", "admin"] },
+  { label: "Profile", href: ROUTES.member.profile, icon: "UserRound", roles: ["member", "librarian", "admin"] },
+];
+
+export const STAFF_NAV: readonly NavItemConfig[] = [
+  { label: "Dashboard", href: ROUTES.staff.dashboard, icon: "LayoutDashboard", roles: ["librarian", "admin"] },
+  { label: "Circulation", href: ROUTES.staff.circulation, icon: "ArrowLeftRight", roles: ["librarian", "admin"] },
+  { label: "Books", href: ROUTES.staff.books, icon: "BookOpen", roles: ["librarian", "admin"] },
+  { label: "Categories", href: ROUTES.staff.categories, icon: "Tags", roles: ["librarian", "admin"] },
+  { label: "Members", href: ROUTES.staff.members, icon: "Users", roles: ["librarian", "admin"] },
+  { label: "Reservations", href: ROUTES.staff.reservations, icon: "Clock", roles: ["librarian", "admin"] },
+  { label: "Fines", href: ROUTES.staff.fines, icon: "Receipt", roles: ["librarian", "admin"] },
+  { label: "Reports", href: ROUTES.staff.reports, icon: "BarChart3", roles: ["librarian", "admin"] },
+];
+
+/** Admin-only entries, appended after STAFF_NAV. */
+export const ADMIN_NAV: readonly NavItemConfig[] = [
+  { label: "Team", href: ROUTES.staff.team, icon: "ShieldCheck", roles: ["admin"] },
+  { label: "Audit Log", href: ROUTES.staff.audit, icon: "ScrollText", roles: ["admin"] },
+  { label: "Settings", href: ROUTES.staff.settings, icon: "Settings", roles: ["admin"] },
+];
+
+
+/* -------------------------------------------------------------------------- */
 /* Pagination                                                                  */
 /* -------------------------------------------------------------------------- */
 

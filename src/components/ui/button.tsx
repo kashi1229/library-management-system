@@ -31,11 +31,12 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        sm: "h-9 gap-1.5 px-3 text-small has-[>svg]:px-2.5 [&_svg:not([class*='size-'])]:size-3.5",
+        // Every size keeps a ≥40px pointer target (code-standards.md).
+        sm: "h-10 gap-1.5 px-3 text-small has-[>svg]:px-2.5 [&_svg:not([class*='size-'])]:size-3.5",
         md: "h-11 gap-2 px-4 text-small has-[>svg]:px-3.5",
         lg: "h-12 gap-2.5 px-6 text-body has-[>svg]:px-5",
         icon: "size-11",
-        "icon-sm": "size-9",
+        "icon-sm": "size-10",
         "icon-lg": "size-12",
       },
     },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useReducedMotion } from "motion/react";
 import {
   fadeUp,
@@ -30,37 +30,42 @@ const REDUCED_MOTION: MotionVariantSet = {
 };
 
 /**
- * Reduced-motion aware variant set.
+ * Hydration-safe "am I on the client yet" flag.
  *
- * `mounted` is false on the server and on the very first client render, so the
- * caller must render the full-motion variants initially — that keeps the server
- * markup and the first client frame identical (no hydration mismatch). Once
- * mounted we can safely swap in the transform-free variants.
+ * Built on `useSyncExternalStore` so there is no `setState`-in-effect render
+ * cascade: the server snapshot is `false`, the client snapshot is `true`, and
+ * React swaps them in without a cascading render.
  */
-export function useMotionVariants(): MotionVariantSet & {
-  reduced: boolean;
-  mounted: boolean;
-} {
-  const prefersReduced = useReducedMotion();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const reduced = mounted && prefersReduced === true;
-
-  return { ...(reduced ? REDUCED_MOTION : FULL_MOTION), reduced, mounted };
+export function useIsHydrated(): boolean {
+  return useSyncExternalStore(
+    subscribeToNothing,
+    () => true,
+    () => false,
+  );
 }
 
-/** Plain boolean flag for hand-rolled animations (hero drift, count-ups). */
+/**
+ * `true` only when the user has asked for reduced motion.
+ *
+ * `useReducedMotion()` returns `null` during SSR and on the first client frame,
+ * so both render `false` — server and client markup always agree. Once resolved,
+ * the transform-free variant set takes over.
+ */
 export function usePrefersReducedMotion(): boolean {
-  const prefersReduced = useReducedMotion();
-  const [mounted, setMounted] = useState(false);
+  return useReducedMotion() === true;
+}
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+/**
+ * Reduced-motion aware variants for the shared motion language in `lib/motion.ts`.
+ * Consumers must keep `initial="hidden"` so the server renders the same hidden
+ * state the client hydrates from.
+ */
+export function useMotionVariants(): MotionVariantSet & { reduced: boolean } {
+  const reduced = usePrefersReducedMotion();
+  return { ...(reduced ? REDUCED_MOTION : FULL_MOTION), reduced };
+}
 
-  return mounted && prefersReduced === true;
+/** No external store to watch — the snapshot alone drives the flag. */
+function subscribeToNothing(): () => void {
+  return () => undefined;
 }

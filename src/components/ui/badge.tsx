@@ -5,7 +5,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * Pill badges (ui-context.md): soft tinted background + colored text.
- * StatusBadge in `components/common` composes these for domain statuses.
+ * Tinted variants use the `*-ink` foregrounds, which are the AA-safe pairings
+ * for their matching `-soft` tint (raw status hues only reach ~2.5–3.2:1).
+ * `StatusBadge` in `components/common` composes these for domain statuses.
  */
 const badgeVariants = cva(
   [
@@ -21,11 +23,11 @@ const badgeVariants = cva(
         default: "bg-primary text-primary-foreground",
         secondary: "bg-muted text-muted-foreground",
         outline: "border border-border bg-transparent text-foreground",
-        soft: "bg-accent-soft text-accent",
-        success: "bg-success-soft text-success",
-        warning: "bg-warning-soft text-warning",
-        danger: "bg-danger-soft text-danger",
-        info: "bg-info-soft text-info",
+        soft: "bg-accent-soft text-accent-ink",
+        success: "bg-success-soft text-success-ink",
+        warning: "bg-warning-soft text-warning-ink",
+        danger: "bg-danger-soft text-danger-ink",
+        info: "bg-info-soft text-info-ink",
       },
     },
     defaultVariants: {
