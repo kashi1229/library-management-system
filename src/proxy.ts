@@ -9,6 +9,10 @@ import { ROLE_HOME, isStaffRole, type Role } from "@/lib/constants";
  * user never sees a flash of protected UI. The real enforcement is server-side:
  * every route handler calls `requireSession()` / `requireRole()` and re-reads
  * the user from the database. Never treat a pass here as authorisation.
+ *
+ * Named `proxy.ts` rather than `middleware.ts`: Next.js 16 renamed the file
+ * convention (the old name still works but logs a deprecation warning), and the
+ * exported function follows the new `proxy` name.
  */
 
 /** Member-area pages that require any signed-in user. */
@@ -22,7 +26,7 @@ const MEMBER_ROUTES = [
   "/profile",
 ] as const;
 
-/** Staff pages that only an admin may open (Unit 10, 18, 19). */
+/** Staff pages that only an admin may open (Units 10, 18, 19). */
 const ADMIN_ROUTES = ["/staff/team", "/staff/audit", "/staff/settings"] as const;
 
 /** Everything under `/staff`, including the admin-only children above. */
@@ -30,7 +34,7 @@ const STAFF_PREFIX = "/staff";
 
 const AUTH_ROUTES = ["/login", "/register"] as const;
 
-export async function middleware(request: NextRequest): Promise<NextResponse> {
+export default async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
   const session = await readSession(request);
 
@@ -50,7 +54,9 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   // 3. Member area.
-  const isMemberRoute = MEMBER_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+  const isMemberRoute = MEMBER_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
   if (isMemberRoute && !session) {
     return redirect(request, `/login?next=${encodeURIComponent(pathname + search)}`);
   }

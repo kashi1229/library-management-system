@@ -71,9 +71,13 @@ src/
 ├── hooks/                      client hooks (useDebounce, useCurrentUser, useNotifications, useMotionVariants…)
 ├── types/                      shared TypeScript types
 ├── models/                     Mongoose models (one file per collection)
-src/middleware.ts               coarse route protection (cookie presence + role claim)
+src/proxy.ts                     coarse route protection (cookie presence + role claim)
 scripts/seed.ts                 seed script (spec in unit 21)
 ```
+
+> **`proxy.ts`, not `middleware.ts`.** Next.js 16 renamed the file convention; the old name still runs but
+> logs a deprecation warning. The exported function is therefore `export default async function proxy(...)`.
+> It is still the coarse first gate described in §Auth & Access Model — real enforcement is server-side.
 
 > The root `src/app/page.tsx` is a Unit 01 placeholder. **Unit 20** introduces `app/(marketing)/page.tsx`,
 > which takes ownership of `/`; the placeholder must be deleted in that same unit to avoid a route conflict.
@@ -92,7 +96,7 @@ scripts/seed.ts                 seed script (spec in unit 21)
 
 ## Auth & Access Model
 - JWT payload: `{ sub: userId, role, name }`, 7-day expiry, signed HS256 with `JWT_SECRET`.
-- `middleware.ts` does coarse gating: unauthenticated → `/login?next=…` for `(member)` and `/staff` routes; non-staff hitting `/staff/*` → redirect `/dashboard`; signed-in user hitting `/login` or `/register` → redirect to their home.
+- `proxy.ts` does coarse gating: unauthenticated → `/login?next=…` for `(member)` and `/staff` routes; non-staff hitting `/staff/*` → redirect `/dashboard`; signed-in user hitting `/login` or `/register` → redirect to their home.
 - **Real enforcement is server-side**: every route handler calls `requireSession()` / `requireRole([...])`, and re-loads the user from the DB to confirm `status` and current `role` (never trust the token alone for privileged actions).
 - Members can only read/modify their own loans, fines, reservations, wishlist, notifications, profile. Ownership is checked in services using the session user id, never an id from the request body.
 - Suspended users: may sign in and read; blocked from reserving, renewing, and being issued books. Wishlist and profile edits remain allowed.

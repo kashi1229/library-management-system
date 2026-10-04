@@ -3,12 +3,12 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend and auth UI.** Units 01–04 complete. The remaining build (05 → 21) is in
-  progress per the developer's instruction to complete the application rather than pause for review per unit.
+- **Phase 1 — Foundation, backend, auth and app shell.** Units 01–05 complete. Units 06 → 21 in progress
+  per the developer's instruction to complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 05 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- Next unit: **05 — App Shell & Navigation**.
+- Build Units 06 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- Next unit: **06 — Cloudinary & Profile**.
 
 ## Completed
 
@@ -76,16 +76,50 @@ Update this file after every meaningful implementation change.
   - The single non-pass was a wrong assertion in the harness (it expected 10+ of 12 tab stops to be
     controls; the register form has exactly 11 controls, so the browser chrome takes the rest).
 
+### Unit 05 — App Shell & Navigation ✅
+- `AppShell` (member + staff variants): 264px sidebar collapsing to a 72px rail, sticky topbar, mobile
+  drawer under 1024px, five-item bottom tab bar under 768px for the member area only.
+- `Sidebar` with Main / Manage / Admin sections derived **by role**, so a librarian never sees the Admin
+  group. `SidebarItem` active state uses a framer-motion `layoutId` pill; `/staff` and `/dashboard` match
+  exactly so the dashboard does not stay lit on sub-pages.
+- `Topbar` (hamburger, breadcrumbs, search, bell, theme, account menu), `Breadcrumbs` (labels resolved
+  from the nav config so they cannot drift), `MobileNav` (Radix Sheet), `BottomTabBar` (`layoutId` active
+  indicator), `UserMenu` (identity, role badge, membership ID, profile, theme, sign out),
+  `NotificationBell` (static until Unit 16), `SuspendedBanner` (non-dismissible, `role="status"`).
+- Layouts resolve the session user **on the server** and pass it down, so there is no client fetch and no
+  auth flash. `staff/layout.tsx` re-checks the role server-side (defence in depth) and admin-only pages
+  re-check `requireAdmin()` in the page itself.
+- 18 placeholder routes (7 member + 11 staff), each with `PageHeader` + `EmptyState` + `loading.tsx`
+  skeleton, plus scoped `not-found.tsx` and a root `error.tsx`.
+- **Migrated `middleware.ts` → `proxy.ts`**: Next.js 16 renamed the file convention and the old name logs
+  a deprecation warning. Build output now reports `ƒ Proxy (Middleware)` with no warning.
+- **Verified in headless Chrome**: 26/26 checks · **0 console errors, 0 page errors, 0 failed requests** ·
+  member/librarian/admin each see exactly their own nav (no admin leakage to librarians) · collapse
+  264 → 72px and persists across reload · drawer opens, traps focus and closes on Escape · bottom tab bar
+  has 5 items with ≥44px targets and none falsely active off-route · staff get no tab bar · suspended
+  banner renders · anonymous requests to all six protected route families redirect to `/login` ·
+  user menu shows identity and membership ID.
+
 ## In Progress
-- Unit 05 — App Shell & Navigation.
+- Unit 06 — Cloudinary & Profile.
 
 ## Next Up
-1. **05** App Shell & Navigation — role-aware sidebar, topbar, mobile drawer + tab bar, user menu,
-   placeholder pages for every route.
-2. **06** Cloudinary & Profile → **07** Categories → **08** Books → **09** Public Catalog →
+1. **06** Cloudinary & Profile → **07** Categories → **08** Books → **09** Public Catalog →
    **10** Members & Team → **11/12** Circulation → **13** Fines → **14** Reservations →
    **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards → **18** Reports & Audit →
    **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
+
+## Bugs Found and Fixed by Browser QA
+Recording these because they were invisible to `tsc`, `eslint` and `next build`:
+- **`PasswordInput` swallowed `className`** — it applied the class to its wrapper `<div>` instead of the
+  `<input>`, so the Lock icon sat on top of the password text.
+- **`TextField` never padded custom controls** — `padded` was defined as `Boolean(Icon) && !Control`, so
+  the `control` branch that receives `className` could never receive the padding.
+- **Checkbox pointer target was 18px** — below WCAG 2.2 SC 2.5.8. Added a transparent `::before` overlay
+  taking it to 24px.
+- **Sidebar collapse did nothing visually** — `AppShell` hard-coded `w-[264px]` on the `<aside>`, so the
+  rail collapsed *inside* a fixed box. Fixed by lifting the preference into a `SidebarState` context that
+  both `AppShell` and `Sidebar` read.
 
 ## Open Questions
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
@@ -113,7 +147,8 @@ Update this file after every meaningful implementation change.
 - `feat/01-bootstrap-design-system` — Unit 01 + context sync.
 - `feat/02-database-models` — Units 02 **and 03** (Unit 03's commit landed here before the branch was
   switched; both units are complete and verified, so history was left intact rather than rewritten).
-- `feat/04-auth-ui` — Unit 04 onward.
+- `feat/04-auth-ui` — Unit 04.
+- `feat/05-app-shell` — Unit 05 onward.
 
 ## Session Notes
 - Start every session by reading `CLAUDE.md`, then all files it lists, then the current unit spec.
