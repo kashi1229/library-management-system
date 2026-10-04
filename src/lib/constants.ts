@@ -237,3 +237,20 @@ export const UPLOAD_FOLDERS = ["covers", "avatars"] as const;
 export type UploadFolder = (typeof UPLOAD_FOLDERS)[number];
 
 export const CLOUDINARY_PREFIX = "athenaeum";
+
+/* -------------------------------------------------------------------------- */
+/* Departments (register form)                                                 */
+/* -------------------------------------------------------------------------- */
+
+export const DEPARTMENTS = [
+  { value: "Computer Science", label: "Computer Science" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Business", label: "Business & Management" },
+  { value: "Humanities", label: "Humanities" },
+  { value: "Natural Sciences", label: "Natural Sciences" },
+  { value: "Social Sciences", label: "Social Sciences" },
+  { value: "Arts & Design", label: "Arts & Design" },
+  { value: "Law", label: "Law" },
+  { value: "Medicine", label: "Medicine & Health" },
+  { value: "Mathematics & Statistics", label: "Mathematics & Statistics" },
+] as const;

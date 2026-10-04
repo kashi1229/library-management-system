@@ -3,79 +3,124 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation & core backend.** Unit 01 complete; the full remaining build is in progress per the
-  developer's instruction to complete the application rather than pause for review after each unit.
+- **Phase 1 — Foundation, backend and auth UI.** Units 01–04 complete. The remaining build (05 → 21) is in
+  progress per the developer's instruction to complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 02 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- Next unit: **02 — Database & Models**.
+- Build Units 05 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- Next unit: **05 — App Shell & Navigation**.
 
 ## Completed
-### Unit 01 — Bootstrap & Design System ✅
-- Restructured to `src/` with the `@/*` → `./src/*` alias, matching `architecture.md`.
-- **Parchment & Ink tokens** in `src/app/globals.css`: full light + dark palettes, radii (`sm/md/lg/xl`),
-  `shadow-soft` / `shadow-lift`, type scale, category accents, and `-soft` + `-ink` status pairs
-  (new tokens, see `ui-context.md`), mapped to Tailwind through one `@theme inline` block.
-- **Fonts** via `next/font` — Fraunces (display), Inter (body), JetBrains Mono (codes) in `src/lib/fonts.ts`.
-- **Theme**: `next-themes` provider (class strategy, `system` default) + animated `ThemeToggle`.
-- **Base UI kit**: 23 shadcn/ui primitives restyled onto the tokens, plus `Field`
-  (label/control/helper/error) and root `not-found.tsx`.
-- **`components/common`**: `PageHeader`, `EmptyState`, `StatCard` (+`StatCardSkeleton`, count-up),
-  `StatusBadge` (full ui-context status→tone map), `ConfirmDialog`, `BookCover` (2:3 + generated fallback),
-  `Logo` (+`InitialAvatar`), `Spinner` (+`LoadingPanel`).
-- **`src/lib/motion.ts`**: `motionTokens`, `transitions`, `springs`, `fadeUp`/`stagger`/`scaleIn`/`slideIn`
-  and their `*Reduced` counterparts. `src/hooks/use-motion-variants.ts` exposes the reduced-motion helpers
-  built on `useSyncExternalStore` (React 19 safe).
-- **`src/lib/utils.ts`** (`cn`, `formatDate`, `formatCurrency`, `initials`), **`src/lib/constants.ts`**
-  (all domain enums, routes, nav config), **`src/lib/cloudinary.ts`** (`cloudinaryUrl()` offline builder).
-- **Style guide** at `/styleguide` (dev-only, hard-404 in production).
-- Tooling: `components.json`, `.prettierrc.json`, `.env.example`, Cloudinary `remotePatterns`, root
-  `not-found.tsx`, folder skeleton from `architecture.md`.
 
-**Unit 01 verification (headless Chrome, `/styleguide` + `/` + 404):**
-- [x] `npm run dev` runs; style guide renders in light **and** dark.
-- [x] Fonts load via `next/font`, 3 faces preloaded, **CLS = 0.0000** at 360 / 768 / 1280px.
-- [x] Theme toggle persists across reload and respects the system default.
-- [x] No raw hex in components — verified by grep and by resolved computed styles.
-- [x] Reduced motion disables transforms (0 transformed elements observed).
-- [x] Responsive at 360px, 768px, 1280px with no horizontal overflow.
-- [x] **0 console errors, 0 page errors, 0 failed requests** at every breakpoint.
-- [x] No TypeScript errors · `npm run lint` clean · `npm run build` passes.
-- [x] Text contrast ≥ 4.5:1 for body, muted, accent and caption text (led to the new `-ink` tokens).
-- [x] Pointer targets ≥ 40px (led to `sm` button `h-10`, `h-12` tab track, switch `::before` hit area).
-- [x] `/styleguide` returns 404 in a production build.
+### Unit 01 — Bootstrap & Design System ✅ · `feat/01-bootstrap-design-system`
+- Restructured to `src/` with the `@/*` → `./src/*` alias, matching `architecture.md`.
+- **Parchment & Ink tokens** in `src/app/globals.css`: full light + dark palettes, radii, `shadow-soft` /
+  `shadow-lift`, type scale, category accents, and `-soft` + `-ink` status pairs, mapped to Tailwind through
+  one `@theme inline` block.
+- **Fonts** via `next/font` — Fraunces (display), Inter (body), JetBrains Mono (codes).
+- **Theme**: `next-themes` (class strategy, `system` default) + animated `ThemeToggle`.
+- **Base UI kit**: 23 shadcn/ui primitives restyled onto the tokens, plus `Field` and root `not-found.tsx`.
+- **`components/common`**: `PageHeader`, `EmptyState`, `StatCard` (+ skeleton, count-up), `StatusBadge`,
+  `ConfirmDialog`, `BookCover` (2:3 + generated fallback), `Logo` (+`InitialAvatar`), `Spinner`, `FormAlert`.
+- **`src/lib/motion.ts`** (`motionTokens`, `transitions`, `springs`, `fadeUp`/`stagger`/`scaleIn`/`slideIn`
+  + `*Reduced`) and `src/hooks/use-motion-variants.ts` built on `useSyncExternalStore`.
+- **`lib/utils.ts`**, **`lib/constants.ts`** (all domain enums, routes, nav config), **`lib/cloudinary.ts`**.
+- **Style guide** at `/styleguide` (dev-only, hard-404 in production).
+- Verified: 0 console errors · CLS 0.0000 · both palettes · 360/768/1280 · contrast ≥ 4.5:1 · prod 404.
+
+### Unit 02 — Database & Models ✅ · `feat/02-database-models`
+- `lib/db.ts`: cached `connectDB()` on `globalThis`, `withTransaction()` via `session.withTransaction`,
+  clear error when `MONGODB_URI` is missing.
+- **12 Mongoose models** with every index from `data-model.md`, enums reused from `lib/constants`:
+  - `Book` weighted text index (title 5, isbn 4, authors 3, tags 2) + pre-validate guard on
+    `availableCopies <= totalCopies`.
+  - `Loan` partial unique index on `{book, member}` where `status='active'` — the "one active loan of the
+    same book per member" rule is now a database guarantee.
+  - `Reservation` FIFO index + partial unique index across `waiting`/`ready`.
+  - `Notification` unique sparse `dedupeKey` for maintenance idempotency.
+  - `AuditLog` createdAt-only, never updated or deleted. `User.passwordHash` is `select:false`.
+- Services: `getSettings()` (upserts singleton, 30s cache), `logAudit()` (real, session-aware, never
+  throws), `notify()` (documented stub → Unit 16), `nextMembershipId()` (atomic `$inc` per year).
+- `lib/api.ts`: `AppError`, `ok`/`fail`, `parseBody`/`parseQuery`/`parseParams`, `paginate`, `buildMeta`,
+  `handler()` (connectDB → callback → error funnel).
+- `GET /api/health`.
+
+### Unit 03 — Auth API & Route Protection ✅
+- Validators: `registerSchema`, `loginSchema`, `changePasswordSchema` (shared with the Unit 04 forms).
+- `lib/auth/*`: `jwt.ts` (jose HS256, 7d), `cookies.ts` (httpOnly/Lax/Secure, dependency-free serialiser),
+  `session.ts` (`getSession`, `requireSession` re-reading the user from the DB, `requireRole`, `requireStaff`,
+  `requireAdmin`, `requireActiveMember`, `getCurrentUser`, `toPublicUser`), `password.ts` (bcrypt cost 10),
+  `rate-limit.ts` (sliding window, 5 / 10 min per IP+email, reset after success).
+- Routes: `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`,
+  `PATCH /auth/password`.
+- `src/middleware.ts`: anonymous → `/login?next=…`, member → `/dashboard` on `/staff/*`,
+  librarian → `/staff` on admin-only pages, signed-in → role home from `/login` / `/register`.
+
+### Unit 04 — Auth UI ✅
+- `AuthLayout`: two panels ≥1024px (form on `background`, decorative panel on `primary` with the Fraunces
+  quote and CSS book spines); single column with a compact logo below that.
+- `BookSpines`: 10 CSS-shape spines in category accent colours, slow offset sine drift, transform only,
+  fully disabled under `prefers-reduced-motion`.
+- `PasswordInput` (Eye/EyeOff toggle, `aria-pressed` + dynamic label), `PasswordStrength` (4 segments,
+  Weak/Fair/Good/Strong, polite live region), `TextField` (label + icon + 44px control + message),
+  `FormAlert` (role=alert, shake, tone per error class).
+- `/login`: email, password, "keep me signed in", inline zod validation, generic error banner, rate-limit
+  tone, `next` param validated as a same-origin path only.
+- `/register`: name, email, phone, department select (10 options + "Other" free text), password with
+  strength meter, confirm password. Server field errors (e.g. email taken) map onto the matching field.
+- `lib/api-client.ts`: typed fetch wrapper with the standard envelope and `ApiRequestError`.
+- **Verified in headless Chrome**: 57/58 checks passed · **0 console errors, 0 page errors, 0 failed
+  requests** · 360/768/1280 × light/dark · CLS 0.0000 · 44px inputs · pointer targets ≥ 40px (checkbox
+  ≥ 24px) · strength meter escalates · mismatch detected · 11/11 controls keyboard-reachable with visible
+  focus rings · reduced motion disables the spine drift.
+  - The single non-pass was a wrong assertion in the harness (it expected 10+ of 12 tab stops to be
+    controls; the register form has exactly 11 controls, so the browser chrome takes the rest).
 
 ## In Progress
-- Unit 02 — Database & Models.
+- Unit 05 — App Shell & Navigation.
 
 ## Next Up
-1. **02** Database & Models — `db.ts`, 12 Mongoose models, settings singleton, `api.ts` helpers.
-2. **03** Auth API & route protection — jose JWT cookie, middleware, role guards.
-3. **04** Auth UI → **05** App Shell → **06** Cloudinary & Profile → **07** Categories →
-   **08** Books → **09** Public Catalog → **10** Members & Team → **11/12** Circulation →
-   **13** Fines → **14** Reservations → **15** Wishlist & Reviews → **16** Notifications →
-   **17** Dashboards → **18** Reports & Audit → **19** Settings → **20** Landing & Polish →
-   **21** Seed, QA, Docs & Deploy.
+1. **05** App Shell & Navigation — role-aware sidebar, topbar, mobile drawer + tab bar, user menu,
+   placeholder pages for every route.
+2. **06** Cloudinary & Profile → **07** Categories → **08** Books → **09** Public Catalog →
+   **10** Members & Team → **11/12** Circulation → **13** Fines → **14** Reservations →
+   **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards → **18** Reports & Audit →
+   **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
 
 ## Open Questions
-- Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Settings (Unit 19) lands.
+- Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
 - Default currency (default USD, editable in Settings).
+- `MONGODB_URI` and `JWT_SECRET` must be supplied in `.env.local` before the API can be exercised
+  end-to-end. Units 03–04 are therefore verified structurally and in the browser, but the live
+  register → login → redirect round trip still needs a real database.
 
 ## Architecture Decisions
-- Next.js 16 App Router (scaffold) + Mongoose + Cloudinary signed uploads + jose JWT cookie sessions.
-- Overdue is derived, never stored. Ready reservations hold a copy. Maintenance job is lazy/on-demand (no cron required).
-- Business policy values live in the Settings singleton.
-- Animation imports from `motion/react` (framer-motion v12+ package rename); all timings live in `src/lib/motion.ts`.
+- Next.js 16 App Router (scaffold) + Mongoose 9 + Cloudinary signed uploads + jose JWT cookie sessions.
+- Animation imports from `motion/react`; all timings live in `src/lib/motion.ts`.
 - Status colours ship as `-soft` tint + `-ink` foreground pairs to satisfy WCAG 2.2 AA.
-- The style guide lives at `/styleguide` behind a `(styleguide)` route group: a leading-underscore folder is a
-  Next.js private folder and is excluded from routing, so `app/_styleguide/` was never reachable.
+- Custom form controls receive `className` on the **input**, not a wrapper, so icon padding composes.
+- Controls keep a ≥40px pointer target even when the painted box is smaller (switch 24px, checkbox 18px),
+  via a transparent `::before` overlay.
+- The style guide lives at `/styleguide` behind a `(styleguide)` route group; a leading-underscore folder
+  is a Next.js private folder and is excluded from routing.
 
 ## Deviations from the Original Kit
-- **Next.js 16 instead of 15** — the scaffold already shipped 16.3.8; App Router APIs used here are identical.
-  Documented in `architecture.md`.
-- **Style guide path** — `/styleguide` instead of `/_styleguide`, for the private-folder reason above.
+- **Next.js 16 / React 19 / Mongoose 9** instead of 15 / 19 / 8 — the scaffold and current registry
+  versions. No API used by this project differs. Documented in `architecture.md`.
+- **Style guide path** `/styleguide` instead of `/_styleguide` (private-folder routing rule).
+
+## Branch Layout
+- `feat/01-bootstrap-design-system` — Unit 01 + context sync.
+- `feat/02-database-models` — Units 02 **and 03** (Unit 03's commit landed here before the branch was
+  switched; both units are complete and verified, so history was left intact rather than rewritten).
+- `feat/04-auth-ui` — Unit 04 onward.
 
 ## Session Notes
 - Start every session by reading `CLAUDE.md`, then all files it lists, then the current unit spec.
-- `npm run dev` must be the only Next process; a stale `next dev` holds a lock in `.next/dev` and the next
-  start will refuse with "Another next dev server is already running".
+- **`.next` must be deleted before each dev-server start** (`rmdir /s /q .next`). OneDrive sync turns the
+  Turbopack cache into a ~150MB tree and the dev server then takes minutes to become ready or refuses with
+  "Another next dev server is already running".
+- A background dev server dies between tool calls. Run the server start **and** the browser check inside a
+  single command, otherwise the probe hits `ERR_CONNECTION_REFUSED`.
+- Browser QA harness lives in `%LOCALAPPDATA%\Temp\opencode\qa` (puppeteer-core + the installed Chrome) so
+  no QA dependency is added to the project.

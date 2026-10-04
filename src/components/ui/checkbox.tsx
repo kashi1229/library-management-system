@@ -10,12 +10,15 @@ function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxP
     <CheckboxPrimitive.Root
       data-slot="checkbox"
       className={cn(
-        "peer size-[18px] shrink-0 cursor-pointer rounded-[5px] border border-input bg-surface",
+        "peer relative size-[18px] shrink-0 cursor-pointer rounded-[5px] border border-input bg-surface",
         "transition-colors duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] outline-none",
         "focus-visible:ring-[3px] focus-visible:ring-ring/45",
         "disabled:cursor-not-allowed disabled:opacity-50",
         "aria-invalid:border-danger aria-invalid:ring-danger/25",
         "data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
+        // 18px painted box, 24px pointer target — WCAG 2.2 SC 2.5.8 (Target
+        // Size, Minimum). The overlay is transparent and captures pointer events.
+        "before:absolute before:-inset-1.5 before:content-['']",
         className,
       )}
       {...props}
