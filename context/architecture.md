@@ -4,17 +4,17 @@
 
 | Layer | Technology | Role |
 |---|---|---|
-| Framework | Next.js 15 (App Router), React 19 | Pages, layouts, route handlers, server components |
+| Framework | Next.js 16 (App Router), React 19 | Pages, layouts, route handlers, server components |
 | Language | TypeScript (strict) | Type safety everywhere |
-| Styling | Tailwind CSS v4 + CSS variables | Token-driven theming (light/dark) |
-| UI primitives | shadcn/ui (Radix UI) | Accessible dialog, dropdown, select, tabs, tooltip, sheet |
+| Styling | Tailwind CSS v4 (`@theme inline`) + CSS variables | Token-driven theming (light/dark) |
+| UI primitives | shadcn/ui (Radix UI via the unified `radix-ui` package) | Accessible dialog, dropdown, select, tabs, tooltip, sheet |
 | Icons | lucide-react | The only icon library |
-| Animation | framer-motion | Page transitions, list stagger, micro-interactions |
+| Animation | `motion` (framer-motion v12+, imported from `motion/react`) | Page transitions, list stagger, micro-interactions |
 | Fonts | next/font (Fraunces, Inter, JetBrains Mono) | Display, body, mono |
 | Database | MongoDB Atlas | Primary data store |
 | ODM | Mongoose 8 | Schemas, validation, indexes, transactions |
 | File storage | Cloudinary | Book covers and avatars (signed uploads) |
-| Auth | jose (JWT) + bcryptjs + httpOnly cookie | Stateless sessions, hashed passwords |
+| Auth | `jose` (JWT) + `bcryptjs` + httpOnly cookie | Stateless sessions, hashed passwords |
 | Validation | zod | Single source of truth for request validation (client + server) |
 | Forms | react-hook-form + @hookform/resolvers | Typed forms with zod |
 | Data fetching | Server Components for reads; `fetch` + SWR-style hook (`swr`) for interactive client lists | Fast initial load, snappy filtering |
@@ -24,20 +24,37 @@
 | Theme | next-themes | Light / dark / system |
 | Hosting | Vercel (app) + Atlas (db) + Cloudinary (media) | Free tiers sufficient |
 
+> **Note on versions.** The scaffold arrived on Next.js 16 / React 19 rather than the Next.js 15 named in the
+> original kit; the App Router APIs used by this project are identical, so the stack was kept as installed
+> instead of being downgraded. `framer-motion` is imported as `motion` because v12+ renamed the package —
+> same library, same author, same API.
+
+## Design System Conventions (established in Unit 01)
+
+- All colour, radius, shadow and type-scale tokens are CSS variables in `src/app/globals.css`, mapped to Tailwind
+  utilities through a single `@theme inline` block. Components use **token classes only**, never raw hex.
+- Status colours ship in `-soft` (tint) + `-ink` (AA-safe foreground on that tint) pairs — see `ui-context.md`.
+- Motion values live only in `src/lib/motion.ts`; components consume the shared variants and the
+  `useMotionVariants()` reduced-motion hook. No ad-hoc durations, easings or springs.
+- `Field` (`components/ui/field.tsx`) is the shared label/control/helper/error wrapper; react-hook-form + zod
+  land with the first form-bearing unit (04).
+- `turbopack.root` is pinned in `next.config.ts` because this project sits inside a larger git repository.
+
 ## System Boundaries (folder ownership)
 
 ```
 src/
 ├── app/
-│   ├── (marketing)/            landing page only
-│   ├── (auth)/                 login, register
-│   ├── (public)/catalog/       public catalog + book detail
+│   ├── (marketing)/            landing page only            [Unit 20]
+│   ├── (auth)/                 login, register              [Unit 04]
+│   ├── (public)/catalog/       public catalog + book detail [Unit 09]
 │   ├── (member)/               dashboard, my-loans, reservations, wishlist, fines, notifications, profile
+│   ├── (styleguide)/           dev-only design-system reference (404 in production) [Unit 01]
 │   ├── staff/                  all staff pages (layout enforces librarian|admin)
 │   └── api/                    route handlers ONLY — thin: auth → validate → call service → respond
 ├── components/
-│   ├── ui/                     shadcn primitives (generated; do not hand-edit unless a spec says so)
-│   ├── common/                 shared building blocks (PageHeader, EmptyState, DataTable, StatCard, ConfirmDialog, BookCover, StatusBadge…)
+│   ├── ui/                     shadcn primitives (generated, then restyled onto our tokens)
+│   ├── common/                 shared building blocks (PageHeader, EmptyState, StatCard, StatusBadge, ConfirmDialog, BookCover, Logo, Spinner …)
 │   ├── layout/                 AppShell, Sidebar, Topbar, MobileNav, ThemeToggle, NotificationBell
 │   └── features/<feature>/     feature-specific components (books, loans, members, …)
 ├── lib/
@@ -47,14 +64,19 @@ src/
 │   ├── validators/             zod schemas (one file per domain)
 │   ├── services/               ALL business logic (circulation, fines, reservations, notifications, audit, reports, settings, maintenance)
 │   ├── api.ts                  response helpers, error classes, handler wrapper
-│   ├── constants.ts            enums, roles, nav config, route lists
+│   ├── constants.ts            enums, roles, statuses, nav config, route lists
+│   ├── motion.ts               motion tokens, transitions, springs, shared variants
+│   ├── fonts.ts                next/font declarations
 │   └── utils.ts                cn(), formatters
+├── hooks/                      client hooks (useDebounce, useCurrentUser, useNotifications, useMotionVariants…)
+├── types/                      shared TypeScript types
 ├── models/                     Mongoose models (one file per collection)
-├── hooks/                      client hooks (useDebounce, useCurrentUser, useNotifications…)
-├── middleware.ts               coarse route protection (cookie presence + role claim)
-└── types/                      shared TypeScript types
+src/middleware.ts               coarse route protection (cookie presence + role claim)
 scripts/seed.ts                 seed script (spec in unit 21)
 ```
+
+> The root `src/app/page.tsx` is a Unit 01 placeholder. **Unit 20** introduces `app/(marketing)/page.tsx`,
+> which takes ownership of `/`; the placeholder must be deleted in that same unit to avoid a route conflict.
 
 **Rule of thumb:** UI never talks to Mongoose. API routes never contain business logic. Services never read `Request`/`Response`.
 

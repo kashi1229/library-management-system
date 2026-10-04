@@ -26,6 +26,23 @@ Never glossy, never cluttered, never neon.
 | `info` | #3B6E8F | #6FA6C8 | Informational |
 
 Each status color also has a `-soft` variant (≈12% tint) for badge backgrounds.
+
+**`-soft` + `-ink` pairing (added in Unit 01 — accessibility requirement):** the raw status hues only reach
+**2.5–3.2:1** contrast on their own `-soft` tint, which fails WCAG 2.2 AA (4.5:1 for text, 3:1 for meaningful
+graphics). Every soft tint therefore has an `-ink` companion used for the *text and icons drawn on that tint*
+(badges, alerts, icon circles, KPI values). Never use a raw status colour as foreground on its `-soft` background.
+
+| Token | Light | Dark | Contrast on its `-soft` tint |
+|---|---|---|---|
+| `accent-ink` | #8F4A24 | #E8A67C | 5.3:1 / 6.7:1 |
+| `success-ink` | #226646 | #7FD3B0 | 5.9:1 / 8.2:1 |
+| `warning-ink` | #8A5E0F | #F0C463 | 5.0:1 / 9.2:1 |
+| `danger-ink` | #9E3722 | #F5A08C | 5.7:1 / 7.6:1 |
+| `info-ink` | #2E5A76 | #9CCBE6 | 6.3:1 / 8.9:1 |
+
+Also present: `surface` (alias of card) and `popover` (floating overlays: dialog, sheet, select, dropdown,
+tooltip, toast) which differ from `surface` in dark mode where overlays sit one step lighter.
+
 **Category accent keys:** `forest #1F3D36`, `terracotta #C2703D`, `ocean #3B6E8F`, `plum #6B3E5E`, `ochre #C98A1B`, `slate #4A5560` (used for generated covers and category chips).
 
 ## Typography
@@ -44,21 +61,40 @@ Scale: Hero `clamp(2.5rem, 6vw, 4.5rem)`; H1 `2.25rem`; H2 `1.75rem`; H3 `1.25re
 
 ## Motion Language
 - Easing: `cubic-bezier(0.22, 1, 0.36, 1)`. Durations: fast 150ms (hover), base 250ms (UI), slow 450ms (page/hero).
+- **Single source of truth:** `src/lib/motion.ts` exports `motionTokens`, `transitions`, `springs`, and the
+  variants `fadeUp` / `stagger` / `scaleIn` / `slideIn` plus their `*Reduced` counterparts.
+  Components must never hardcode a duration, easing or spring. Reduced-motion awareness comes from
+  `useMotionVariants()` / `usePrefersReducedMotion()` in `src/hooks/use-motion-variants.ts`.
 - **Page transition:** fade + 8px rise. **Lists:** stagger children 40ms. **Cards:** hover lifts 2px + shadow-lift. **Buttons:** press scales to 0.98. **Dialogs/Sheets:** scale-in 0.97→1 / slide from edge. **Counters:** KPI numbers count up once on view. **Heart (wishlist):** spring pop + fill. **Bell:** subtle shake on new notification. **Skeletons:** soft shimmer. **Hero:** book covers float with slow, offset sine drift (transform only).
+- Animation library is **`motion`** (the current name of framer-motion, v12+); import from `motion/react`, never `framer-motion`.
 - `prefers-reduced-motion`: disable transforms/drift; keep opacity fades ≤150ms.
 - Never animate more than 2 things competing for attention at once.
 
+## Hydration Rules (React 19)
+- A server-rendered animated element must declare `initial` matching the variant the server paints, so markup and first client frame agree. Never `setState` synchronously inside `useEffect` (React 19 lint rule `react-hooks/set-state-in-effect`).
+- Use `useSyncExternalStore` (via `useIsHydrated()`) instead of the `useEffect(() => setMounted(true))` pattern.
+- Animated values must initialise to their **final** server value, then animate from the "from" state once mounted — so there is no zero-flash.
+
+## Style Guide Route
+- The Unit 01 design system is proven at **`/styleguide`** (source: `src/app/(styleguide)/styleguide/`).
+- A leading-underscore folder is a Next.js *private folder* and is excluded from routing, so `app/_styleguide/`
+  would never have been reachable; the route group `(styleguide)` is used instead.
+- The page hard-404s when `NODE_ENV === "production"`, so it is compiled out of production builds.
+- Delete it when the design system is stable enough to retire, or keep it as living documentation.
+
 ## Component Conventions
-- **Buttons:** variants `default` (primary), `secondary` (surface-muted), `outline`, `ghost`, `accent`, `destructive`; sizes `sm/md/lg/icon`. Leading Lucide icon optional.
-- **Inputs:** 44px height, border `input`, focus ring `ring`, label above, helper/error text below in `muted-foreground`/`danger`.
+- **Buttons:** variants `default` (primary), `secondary` (surface-muted), `outline`, `ghost`, `accent`, `destructive`; sizes `sm/md/lg/icon` (`icon-sm`, `icon-lg` also available). Leading Lucide icon optional. **Every size keeps a ≥40px pointer target** — `sm` is `h-10`, not `h-9`.
+- **Inputs:** 44px height, border `input`, focus ring `ring`, label above, helper/error text below in `muted-foreground`/`danger`. Wrap controls in `Field` (`components/ui/field.tsx`) so id/aria wiring is automatic.
 - **Cards:** `surface`, `border`, radius `lg`, `shadow-soft`.
-- **Badges (StatusBadge):** pill, soft tinted background + colored text + small dot. Mapping: `available`=success, `low`=warning (≤1 copy), `unavailable`=danger, `on_time`=success, `due_soon`=warning, `overdue`=danger, `returned`=muted, `waiting`=warning, `ready`=info, `fulfilled`=success, `expired/cancelled`=muted, `unpaid`=danger, `paid`=success, `waived`=muted, `active`=success, `suspended`=danger.
+- **Badges (StatusBadge):** pill, soft tinted background + `-ink` colored text + small dot (dot uses `-ink` too). Mapping: `available`=success, `low`=warning (≤1 copy), `unavailable`=danger, `on_time`=success, `due_soon`=warning, `overdue`=danger, `returned`=muted, `waiting`=warning, `ready`=info, `fulfilled`=success, `expired/cancelled`=muted, `unpaid`=danger, `paid`=success, `waived`=muted, `active`=success, `suspended`=danger.
 - **BookCover:** 2:3 ratio, radius `md`, subtle inner border and spine highlight on the left edge (CSS gradient). Fallback: gradient from category color + serif title initials + author line.
 - **DataTable:** sticky header, zebra off, row hover `muted`, sortable headers, pagination footer, responsive: converts to **stacked cards under 768px**.
 - **Dialogs:** confirm destructive actions with ConfirmDialog (title, consequence text, danger button).
 - **Toasts:** sonner, bottom-right (top-center on mobile), icon by type.
-- **Empty states:** centered Lucide icon in an `accent-soft` circle, serif headline, one sentence, primary action.
-- **Skeletons** match final layout.
+- **Empty states:** centered Lucide icon in an `accent-soft` circle (glyph in `accent-ink`), serif headline, one sentence, primary action.
+- **Skeletons** match final layout, animate-pulse over `muted`.
+- **Switch:** visual track is 24px tall, but a `::before` overlay grows the pointer target to 40px (`code-standards.md` touch-target rule).
+- **Tabs:** list track is `h-12` so triggers stay ≥40px.
 
 ## Layout Patterns
 - **Marketing/public:** sticky translucent navbar (logo left; Catalog, About links; theme toggle; Sign in / Get started or avatar menu). Footer with 3 columns.
