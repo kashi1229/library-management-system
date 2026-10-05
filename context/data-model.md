@@ -10,7 +10,7 @@ Refs are ObjectIds. "(idx)" = index. Define every enum in `lib/constants.ts` and
 | email | string, required, lowercase, **unique idx** | |
 | passwordHash | string, required, `select:false` | bcrypt, cost 10 |
 | role | enum `admin|librarian|member`, default `member` (idx) | |
-| membershipId | string, unique sparse idx | Generated for members only: `LIB-YYYY-NNNN` using a `counters` collection (atomic `$inc`) |
+| membershipId | string, unique sparse idx | Generated for members only: `LIB-YYYY-NNNN` using a `counters` collection (atomic `$inc`). **The field must be absent on staff records — a stored `null` counts as a value and trips the unique index** |
 | phone | string, optional | |
 | department | string, optional | e.g. "Computer Science" |
 | avatar | `{ url, publicId }` optional | Cloudinary |
@@ -23,6 +23,12 @@ Refs are ObjectIds. "(idx)" = index. Define every enum in `lib/constants.ts` and
 
 ## Category (`categories`)
 | name (unique) | slug (unique idx) | description | icon (Lucide icon name string, default "BookOpen") | color (token key: `forest|terracotta|ocean|plum|ochre|slate`) |
+
+> `icon` is validated against the **curated whitelist** `CATEGORY_ICON_NAMES` in
+> `lib/validators/category.ts` (42 names), and `color` against `CATEGORY_COLORS`. The whitelist is the only
+> source: `lib/icons.ts` builds its name→component map from it at module scope, so a stored icon can never
+> fail to resolve. Deletion is blocked while **any** book references the category (archived included, to
+> avoid a dangling ref), even though `bookCount` in `GET /api/categories` counts active books only.
 
 ## Book (`books`)
 | Field | Type | Notes |

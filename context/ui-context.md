@@ -45,6 +45,13 @@ tooltip, toast) which differ from `surface` in dark mode where overlays sit one 
 
 **Category accent keys:** `forest #1F3D36`, `terracotta #C2703D`, `ocean #3B6E8F`, `plum #6B3E5E`, `ochre #C98A1B`, `slate #4A5560` (used for generated covers and category chips).
 
+**Accent inks (`--cat-ink-light`, `--cat-ink-dark`):** the category hues are fixed in `:root` and never
+flipped per theme, so their foregrounds must be fixed too. `primary-foreground` is *not* usable on them —
+it flips with the theme and lands cream on terracotta (3.5:1 in light) and dark ink on forest (1.4:1 in
+dark). Use `--cat-ink-light #FAF7F2` for forest/ocean/plum/slate (≥5.2:1) and `--cat-ink-dark #1A1009` for
+terracotta/ochre (≥5.1:1). Reach them through `CATEGORY_COLOR_CLASS[color].on` rather than hand-picking —
+`components/common/category-icon-tile.tsx` is the shared tile that applies `bg` + `on` together.
+
 ## Typography
 | Role | Font | Notes |
 |---|---|---|

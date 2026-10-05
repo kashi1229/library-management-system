@@ -3,12 +3,12 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell and profile.** Units 01–06 complete. Units 07 → 21 in
+- **Phase 1 — Foundation, backend, auth, shell and profile.** Units 01–07 complete. Units 08 → 21 in
   progress per the developer's instruction to complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 07 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- Next unit: **07 — Categories**.
+- Build Units 08 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- Next unit: **08 — Books (Catalog Management)**.
 
 ## Completed
 
@@ -101,10 +101,48 @@ Update this file after every meaningful implementation change.
   user menu shows identity and membership ID.
 
 ## Next Up
-1. **07** Categories → **08** Books → **09** Public Catalog →
+1. **08** Books → **09** Public Catalog →
    **10** Members & Team → **11/12** Circulation → **13** Fines → **14** Reservations →
    **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards → **18** Reports & Audit →
    **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
+
+### Unit 07 — Categories ✅
+- `lib/validators/category.ts` — `CATEGORY_ICON_NAMES` (**42-icon curated whitelist**), `createCategorySchema`,
+  `updateCategorySchema`, `categoryIdSchema`, and `slugify` (shared with the Unit 21 seed script).
+  Icon is a `z.enum` over the whitelist, so a typo in the whitelist itself is a compile error.
+- `lib/services/categories.ts` — `listCategories` (one `$lookup` aggregation counting **active** books),
+  `createCategory`, `updateCategory` (re-slugs on rename, supports an explicit `reslug`), `deleteCategory`
+  (blocked while **any** book references it, with the count in the message). All three audited, updates
+  carrying `before`/`after`. Create and update both return `bookCount`.
+- Routes: `GET /api/categories` (**public** — catalog filter + landing showcase), `POST`, `PATCH /:id`,
+  `DELETE /:id` (staff). Every handler goes through `handler()` → `requireStaff()` → zod → one service call.
+- `src/lib/icons.ts` is now the single name→component map. `CATEGORY_ICON_COMPONENTS` is typed
+  `Record<CategoryIconName, LucideIcon>` (not `Record<string, …>`) and is resolved at **module scope**, so a
+  stored icon name can only ever resolve and its identity never changes. The loose `CATEGORY_ICONS` /
+  `categoryIcon` / `categorySwatch` helpers were removed — two sources of truth for the same mapping is how
+  they drift.
+- `components/common/category-icon-tile.tsx` — the accent tile shared by the card and the dialog preview, so
+  `bg` and its matching `on` ink can never diverge. Built with `createElement` because
+  `react-hooks/static-components` (React Compiler) rejects a whitelist lookup bound to a JSX tag during
+  render; the reference comes from a frozen module map, so it is a false positive, not a real remount risk.
+- `components/features/categories/*`: `categories-manager` (SWR + optimistic writes with rollback),
+  `category-card` (staggered entrance, `MoreHorizontal` menu), `category-dialog` (RHF + zod, keyed so
+  values come from props with no reset effect), `icon-picker` (searchable 42-tile grid), `color-swatch-picker`
+  (six accents, tick marks the selection so it does not rely on colour alone).
+- `src/hooks/use-roving-radio.ts` — real APG radiogroup behaviour for both pickers: arrow keys move the
+  selection, Home/End jump, arrows wrap, and only the checked option sits in the tab order so a 42-tile grid
+  never swallows 42 tab stops. The icon search always keeps the current selection visible, so the group can
+  never end up with nothing checked and nothing focusable.
+- Card layout is **vertical** (tile + menu on one line, name/description full width). The grid is 1 → 2 → 3
+  columns. This replaced a side-by-side tile that left ~95px for the heading and truncated nearly every
+  category name to "Art…".
+- **Verified end to end against a real local MongoDB** (33 API checks + 106 browser checks, 0 page errors,
+  0 failed requests): create/edit/delete, duplicate name as an inline field error, delete blocked while
+  books exist, live icon + colour preview, arrow-key swatch navigation, optimistic rollback, audit entries
+  in the database, 360/768/1280 × light/dark, CLS 0.0000, no overflow, no clipped card text, reduced motion,
+  menu focus management.
+  - The only console entries are the **intentional** 409 (duplicate name) and 400 (blocked delete) responses
+    Chrome logs for any non-2xx fetch.
 
 ### Unit 06 — Cloudinary Uploads & Profile ✅
 - **Module split** (documented in `architecture.md`, must not be merged):
@@ -143,8 +181,8 @@ Update this file after every meaningful implementation change.
 Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - **`PasswordInput` swallowed `className`** — it applied the class to its wrapper `<div>` instead of the
   `<input>`, so the Lock icon sat on top of the password text.
-- **`TextField` never padded custom controls** — `padded` was defined as `Boolean(Icon) && !Control`, so
-  the `control` branch that receives `className` could never receive the padding.
+- **`TextField` never padded custom controls** — `padded` was defined as `Boolean(Icon) && !Control`, so the
+  `control` branch that receives `className` could never receive the padding.
 - **Checkbox pointer target was 18px** — below WCAG 2.2 SC 2.5.8. Added a transparent `::before` overlay
   taking it to 24px.
 - **Sidebar collapse did nothing visually** — `AppShell` hard-coded `w-[264px]` on the `<aside>`, so the
@@ -160,22 +198,57 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - **A revoked blob URL latched forever** — `preview` was set once and never cleared, so after the first
   upload the preview pointed at a dead object URL and masked the real image.
 
+### Unit 07 (additions)
+- **`PATCH /api/categories/:id` silently wiped `icon` and `color`** — the highest-risk bug of the unit, and
+  it passed `tsc`, `eslint` and `next build`. `updateCategorySchema` was built with
+  `createCategorySchema.partial()`, and **Zod 4's `.partial()` keeps an inner `.default()`**: renaming a
+  category reset its icon to `BookOpen` and its colour to `forest`. Confirmed with a runtime probe before
+  changing anything (`PATCH {name}` → `{name, icon:"BookOpen", color:"forest"}`), then fixed by composing
+  both schemas from shared field schemas that carry **no** defaults. A duplicate-name check that only
+  exercises `POST` will never catch this — the pass asserts a rename *preserves* both fields.
+- **`tailwind-merge` treated the type-scale tokens as colours** — `cn("text-primary-foreground",
+  "text-small")` classified `text-small` as a text colour and **deleted the colour class**, so elements
+  silently inherited body text and lost their contrast. Fixed by registering the eight tokens in
+  `extendTailwindMerge({ classGroups: { "font-size": [...] } })` in `lib/utils.ts`. Affects every
+  `cn()` call in the app, not just categories.
+- **Category glyphs failed WCAG AA** — the tile used `text-primary-foreground` on the category accent, which
+  flips with the theme: 3.5:1 on terracotta in light and **1.4:1 on forest in dark**. Fixed by adding the
+  theme-independent `--cat-ink-light` / `--cat-ink-dark` tokens (documented in `ui-context.md`) and routing
+  every accent surface through `CATEGORY_COLOR_CLASS[color].on`.
+- **`accent-foreground` was white on terracotta** (3.7:1, fails AA) → dark warm ink.
+- **Card names were truncated to "Art…"** — a side-by-side icon tile inside a four-column grid left ~95px
+  for a 20px serif heading. Caught only by reading the screenshot, not by any assertion: every check passed
+  because none of them looked at the heading. The card is now vertical and the grid is 1 → 2 → 3 columns,
+  and the pass now asserts `scrollWidth <= clientWidth` on every card heading and paragraph.
+- **Mojibake shipped to the screen** — the confirm dialog rendered the opening and closing curly quotes as
+  `A-circumflex / euro / oe-ligature` triplets, i.e. `Delete` + three mangled glyphs + `Science Fiction?`.
+  The em dashes and the smart quotes were **double-encoded**: UTF-8 bytes decoded as Windows-1252 and
+  re-written as UTF-8, in 7 files from earlier units (`image-uploader.tsx` even had a mangled separator in
+  the visible copy, reading `WebP` + two bad glyphs + `up to 3MB`). Repaired by reversing the transform with
+  a byte table derived from Node's own `windows-1252` decoder, applied per line and only where the result
+  is valid UTF-8 that no longer contains the signature. The pass now asserts that none of the four tell-tale
+  code points (`U+00C2`, `U+00C3`, `U+00E2`, `U+FFFD`) appears in the rendered text.
+  - Root cause to avoid repeating: **do not round-trip a source file through PowerShell
+    `Get-Content -Raw` + `Set-Content`.** It reads as the system ANSI codepage, so every non-ASCII character
+    is corrupted and a BOM is added. Use the editor tools instead.
+
 ## In Progress
-- Unit 07 — Categories.
+- Unit 08 — Books (Catalog Management). Not started.
 
 ## Open Questions
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
 - Default currency (default USD, editable in Settings).
-- `MONGODB_URI`, `JWT_SECRET` and the three `CLOUDINARY_*` values must be in `.env.local` before the
-  API can be exercised end to end. Units 03–06 are verified structurally and in the browser, but the
-  live register → login → upload round trip needs a real database **and** real Cloudinary credentials.
+- `CLOUDINARY_*` must be real credentials in `.env.local` for the live upload round trip. `MONGODB_URI`
+  already points at a running **local** MongoDB, so every non-transactional unit can now be verified against
+  a real database (Unit 07 was). **Transactions still need a replica set** — circulation (issue / return /
+  reserve-promote) will not work against the current standalone instance.
 - Confirmed against the spec: **suspended members may still edit their profile and avatar.**
   `architecture.md` §Auth & Access Model says "Wishlist and profile edits remain allowed", and
   `requireActiveMember()` is reserved for reserve / renew / issue. `PATCH /api/profile` therefore uses
   `requireSession()`, not `requireActiveMember()` — intentional, not an oversight.
-- The project has **no test files**. `project-overview.md` scopes automated suites out, but the Unit 06
-  pass found two HIGH bugs (broken signature, avatar never persisted) that any test would have caught.
-  Worth revisiting at Unit 21.
+- The project has **no test files**. `project-overview.md` scopes automated suites out, but Units 06 and 07
+  each found bugs that any test would have caught (broken signature, avatar never persisted, PATCH wiping
+  icon and colour). Worth revisiting at Unit 21.
 - The browser QA harness lives outside the repo in `%LOCALAPPDATA%\Temp\opencode\qa` (puppeteer-core plus
   the installed Chrome), so no QA dependency is added to the project.
 
@@ -188,6 +261,16 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
   via a transparent `::before` overlay.
 - The style guide lives at `/styleguide` behind a `(styleguide)` route group; a leading-underscore folder
   is a Next.js private folder and is excluded from routing.
+- **Icon names are whitelisted in `lib/validators/category.ts` and resolved only in `lib/icons.ts`.** The map
+  is built at module scope and typed `Record<Name, LucideIcon>`, so a stored name can neither fail to
+  resolve nor change identity between renders. A dynamic `import()` keyed on user input is never used.
+- **`Field`'s `<label for>` must target a real control.** The pickers pass an explicit `htmlFor` (the icon
+  search input, and the *selected* colour swatch — a `<button>` is a labelable element), so clicking a
+  field label lands on the current control instead of dead-ending.
+- **Roving tabindex is a shared hook** (`useRovingRadio`) rather than per-picker logic. Any ARIA
+  `radiogroup` in this app must implement it: only the checked option is tabbable, arrows move the selection.
+- **Accent-coloured surfaces use a fixed ink, never `primary-foreground`.** The category hues do not flip
+  per theme, so their foregrounds must not either. See `ui-context.md` §Accent inks.
 
 ## Deviations from the Original Kit
 - **Next.js 16 / React 19 / Mongoose 9** instead of 15 / 19 / 8 — the scaffold and current registry
@@ -199,14 +282,26 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - `feat/02-database-models` — Units 02 **and 03** (Unit 03's commit landed here before the branch was
   switched; both units are complete and verified, so history was left intact rather than rewritten).
 - `feat/04-auth-ui` — Unit 04.
-- `feat/05-app-shell` — Units 05 and 06 (Unit 06's commit followed Unit 05 on the same branch).
+- `feat/05-app-shell` — Units 05, 06 and 07 (Unit 07's commit followed on the same branch).
 
 ## Session Notes
 - Start every session by reading `CLAUDE.md`, then all files it lists, then the current unit spec.
 - **`.next` must be deleted before each dev-server start** (`rmdir /s /q .next`). OneDrive sync turns the
   Turbopack cache into a ~150MB tree and the dev server then takes minutes to become ready or refuses with
-  "Another next dev server is already running".
+  "Another next dev server is already running". A stale `next dev` from a killed session keeps a file handle
+  and makes the delete fail — find it with
+  `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` and stop the ones whose `CommandLine` matches
+  `*next*`.
 - A background dev server dies between tool calls. Run the server start **and** the browser check inside a
-  single command, otherwise the probe hits `ERR_CONNECTION_REFUSED`.
+  single command, otherwise the probe hits `ERR_CONNECTION_REFUSED`. `run-unit07.ps1` in the QA folder is the
+  working pattern: clean `.next` → seed fixtures → start server → poll `/api/health` → API pass → browser
+  pass → audit read → stop server.
 - Browser QA harness lives in `%LOCALAPPDATA%\Temp\opencode\qa` (puppeteer-core + the installed Chrome) so
   no QA dependency is added to the project.
+- **Read the screenshots.** Every assertion passed on the Unit 07 pass that first revealed the truncated card
+  names and the mojibake. Assert on what a user would notice — text clipping, encoding, contrast — not only
+  on presence and count.
+- The React Compiler rules **are** live in this project: `react-hooks/static-components` rejects a component
+  resolved into a JSX tag during render, and `react-hooks/refs` rejects writing a ref during render. Build
+  against them instead of around them.
+

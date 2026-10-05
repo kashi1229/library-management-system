@@ -24,10 +24,13 @@ Roles: **P** public, **M** member+, **S** staff (librarian|admin), **A** admin.
 > Clients must echo back every signed field (including `max_file_size`) when POSTing to Cloudinary.
 
 ## Categories
-| GET | /categories | P | List with `bookCount` |
-| POST | /categories | S | Create |
-| PATCH | /categories/:id | S | Update |
-| DELETE | /categories/:id | S | Delete (blocked if books exist) |
+| GET | /categories | P | List with `bookCount` (active books only) |
+| POST | /categories | S | Create → `{ category }` including `bookCount` |
+| PATCH | /categories/:id | S | Update → `{ category }`; re-slugs on rename. Omitted keys are left untouched |
+| DELETE | /categories/:id | S | Delete → `{ id }` (blocked if **any** book references it, archived included) |
+
+> Create and update echo `bookCount` so a client can write the response straight into its cache without
+> painting an "undefined books" card until the next revalidation.
 
 ## Books
 | GET | /books | P | Query: `q, category, language, availability(available|all), yearFrom, yearTo, sort(newest|title|popular|rating), status(S only), page, limit` |
