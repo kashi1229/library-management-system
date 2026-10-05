@@ -143,6 +143,10 @@ Update this file after every meaningful implementation change.
   menu focus management.
   - The only console entries are the **intentional** 409 (duplicate name) and 400 (blocked delete) responses
     Chrome logs for any non-2xx fetch.
+  - Follow-up pass on the dialog UX: 16/16 checks · 0 console errors, 0 page errors, 0 failed requests ·
+    Save visible at every viewport · Save disabled until dirty · Escape / Cancel / outside-click all guard
+    dirty input · "Keep editing" restores every edit · "Discard" creates nothing · clean Escape closes
+    immediately · body scrolls while the title and footer stay pinned · confirmation copy free of em dashes.
 
 ### Unit 06 — Cloudinary Uploads & Profile ✅
 - **Module split** (documented in `architecture.md`, must not be merged):
@@ -197,6 +201,32 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
   server refresh clobbered it, leaving the API's avatar branch as dead code. Now calls `profileApi.update`.
 - **A revoked blob URL latched forever** — `preview` was set once and never cleared, so after the first
   upload the preview pointed at a dead object URL and masked the real image.
+
+### Unit 07 — Categories (post-review fixes)
+Reported by the developer after the first commit, then verified in the browser:
+- **Save was unreachable on most laptops.** The dialog measured **1034px tall** and `DialogContent` has no
+  height cap and centres itself with `translate-y-[-50%]`, so on any viewport under ~1040px the title was
+  clipped off the top and the **Save button sat below the fold with nothing to scroll**
+  (`scrollable: false`, `canScrollToSave: false` — genuinely unreachable, not merely awkward). Fixed by
+  capping the dialog at `max-h-[calc(100dvh-2rem)]`, making the middle region the only scroll container
+  (`overflow-y-auto overscroll-contain`), and pinning the action row. This is the "sticky action footer for
+  long forms" rule in `ui-context.md`; it was not being applied. Verified at 1920×1080, 1440×900, 1366×768,
+  1280×720 and 1024×640.
+- **Clicking "Keep editing" submitted the form.** Replacing the action row with the discard prompt
+  unmounted the form's **only submit button**, and a form with none falls into the implicit-submission
+  path: the real mouse click fired `SUBMIT` and created a category the user was trying to abandon
+  (reproduced with an event log — `CLICK <BUTTON type=button> "Keep editing"` immediately followed by
+  `SUBMIT`). Fixed by moving the prompt to its **own pinned row under the header** so the submit button is
+  never unmounted; it is also disabled while the prompt is showing. Note: a synthetic `el.click()` did
+  *not* reproduce this — only a real mouse click, so the harness must not use `el.click()` for this check.
+- **Unsaved edits were dropped silently.** Escape, the close button, Cancel and a click outside now all
+  route through `requestClose()`, which asks before discarding. `Escape` on a clean form still closes
+  immediately. The prompt is a row rather than a nested `AlertDialog`, because nesting a modal inside a
+  Radix dialog strands focus.
+- **Save is now disabled until the form is dirty**, so the button's state tells the user whether there is
+  anything to save.
+- **Confirmation copy cleaned up** per the developer's request: the em dashes are gone from both branches of
+  the delete confirmation, rewritten as plain sentences.
 
 ### Unit 07 (additions)
 - **`PATCH /api/categories/:id` silently wiped `icon` and `color`** — the highest-risk bug of the unit, and
@@ -264,6 +294,18 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - **Icon names are whitelisted in `lib/validators/category.ts` and resolved only in `lib/icons.ts`.** The map
   is built at module scope and typed `Record<Name, LucideIcon>`, so a stored name can neither fail to
   resolve nor change identity between renders. A dynamic `import()` keyed on user input is never used.
+- **Long dialogs cap at `max-h-[calc(100dvh-2rem)]` with a pinned action row.** `DialogContent` has no
+  height cap and centres itself with `translate-y-[-50%]`, so any dialog over ~1000px pushes its own
+  footer off-screen on a laptop with no way to scroll to it. Any future dialog with a form long enough to
+  hit this (Unit 08's book form will) must apply the same three-part layout: capped container, single
+  scrolling region, pinned footer.
+- **Never unmount a form's only submit button.** A form with no submit button falls into the
+  implicit-submission path, where a real mouse click on a `type="button"` inside it submits anyway. Keep
+  the submit button mounted and disable it instead of swapping it out. Related: `el.click()` does not
+  reproduce this class of bug — use a real mouse event in the harness.
+- **A dirty form must guard every close path**: Escape, the close button, Cancel and click-outside. Route
+  them through one `requestClose()` so none can discard input silently. Do not nest a second modal for the
+  confirmation — it strands focus inside a Radix dialog; use a pinned row instead.
 - **`Field`'s `<label for>` must target a real control.** The pickers pass an explicit `htmlFor` (the icon
   search input, and the *selected* colour swatch — a `<button>` is a labelable element), so clicking a
   field label lands on the current control instead of dead-ending.
@@ -282,7 +324,15 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - `feat/02-database-models` — Units 02 **and 03** (Unit 03's commit landed here before the branch was
   switched; both units are complete and verified, so history was left intact rather than rewritten).
 - `feat/04-auth-ui` — Unit 04.
-- `feat/05-app-shell` — Units 05, 06 and 07 (Unit 07's commit followed on the same branch).
+- `feat/05-app-shell` — Units 05, 06 and 07, plus the post-review dialog fix (all on the same branch).
+
+## First Admin Account
+Unit 07 needed a librarian to verify with, and the register endpoint only ever creates a member by design,
+so an admin was inserted directly into MongoDB: **`admin@gmail.com`** (role `admin`, bcrypt cost 10
+matching `lib/auth/password.ts`, and no `membershipId`, since that field's sparse unique index rejects a
+stored `null`). The bootstrap script lives in the QA folder outside the repo, so the credential is not
+committed. Sign in with it to reach `/staff/*`; a member is silently redirected to `/dashboard` by
+`proxy.ts` rather than shown an error, which looks like a missing page.
 
 ## Session Notes
 - Start every session by reading `CLAUDE.md`, then all files it lists, then the current unit spec.
@@ -301,6 +351,19 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - **A 404 page's text appears in *every* page's HTML**, because `not-found.tsx` ships in the shared client
   payload. Asserting `"This shelf is empty" in html` is therefore not a 404 test — assert on the route's own
   markers (`name="email"`, `<h1>Welcome back</h1>`) instead.
+- **QA runs must not assume a clean database.** A row left over from an earlier run turns a POST into a
+  409, which correctly keeps the dialog open and reads exactly like a hung save. Generate a unique name per
+  run (`QA ${Date.now().toString(36)}`) and delete it afterwards. Two of the "hangs" chased during the
+  dialog fix were this, not the app.
+- **A browser pass needs a real mouse, and real settle time.** Radix swallows `Escape` during the open
+  animation, so wait ~900ms after opening a dialog before keying it; and `ElementHandle.click()` /
+  `page.mouse.click()` dispatch genuine pointer events, unlike `el.click()` inside `page.evaluate`. Use the
+  real ones or the harness will both miss real bugs and invent them.
+- **Local MongoDB is running and `MONGODB_URI` points at it**, so units can be verified against a real
+  database rather than request interception. For the browser pass, create the accounts and fixtures
+  directly in Mongo (bcrypt cost 10, matching `lib/auth/password.ts`; **omit `membershipId`** on staff —
+  the sparse unique index rejects a stored `null`). There is no public path to a staff account: register
+  only ever makes a member, and `POST /api/team` does not arrive until Unit 10.
 - A background dev server dies between tool calls. Run the server start **and** the browser check inside a
   single command, otherwise the probe hits `ERR_CONNECTION_REFUSED`. `run-unit07.ps1` in the QA folder is the
   working pattern: clean `.next` → seed fixtures → start server → poll `/api/health` → API pass → browser
