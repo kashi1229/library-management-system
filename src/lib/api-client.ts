@@ -1,6 +1,8 @@
 import type { NextResponse } from "next/server";
 import type { ApiFailure, ApiSuccess } from "@/lib/api";
 import type { FieldErrors } from "@/lib/api";
+import type { CategoryColor } from "@/lib/constants";
+import type { CategoryIconName } from "@/lib/validators/category";
 import type { CloudinaryImage, PublicUser } from "@/types";
 
 /**
@@ -147,6 +149,52 @@ export const uploadsApi = {
       method: "DELETE",
       body: { publicId },
     }),
+};
+
+/* -------------------------------------------------------------------------- */
+/* Categories                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Public shape; mirrors `CategoryWithCount` on the server, serialised. */
+export type CategorySummary = {
+  _id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  /** Always one of `CATEGORY_ICON_NAMES`. */
+  icon: CategoryIconName;
+  /** Always one of the six `CATEGORY_COLORS` keys. */
+  color: CategoryColor;
+  bookCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CategoryInput = {
+  name: string;
+  description?: string;
+  /** Always one of `CATEGORY_ICON_NAMES`. */
+  icon?: CategoryIconName;
+  /** Always one of the six `CATEGORY_COLORS` keys. */
+  color?: CategoryColor;
+};
+
+export const categoriesApi = {
+  list: (signal?: AbortSignal) =>
+    request<{ items: CategorySummary[] }>("/categories", { signal }).then((d) => d.items),
+
+  create: (input: CategoryInput) =>
+    request<{ category: CategorySummary }>("/categories", { method: "POST", body: input }).then(
+      (d) => d.category,
+    ),
+
+  update: (id: string, input: Partial<CategoryInput>) =>
+    request<{ category: CategorySummary }>(`/categories/${id}`, { method: "PATCH", body: input }).then(
+      (d) => d.category,
+    ),
+
+  remove: (id: string) =>
+    request<{ id: string }>(`/categories/${id}`, { method: "DELETE" }),
 };
 
 /* -------------------------------------------------------------------------- */
