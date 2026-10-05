@@ -1,19 +1,14 @@
 import type { Metadata } from "next";
-import { Tags } from "lucide-react";
-import { PlaceholderPage } from "@/components/common/placeholder-page";
+import { requireStaff } from "@/lib/auth/session";
+import { CategoriesManager } from "@/components/features/categories/categories-manager";
 
 export const metadata: Metadata = {
   title: "Categories",
-  description: "Organise the catalog into browsable subjects.",
+  description: "Create and manage the catalog shelves that group related books.",
 };
 
+/** Staff page. The layout already enforces the role; this is belt and braces. */
 export default async function CategoriesPage() {
-  return (
-    <PlaceholderPage
-      title="Categories"
-      description="Organise the catalog into browsable subjects."
-      icon={Tags}
-      unit={7}
-    />
-  );
+  await requireStaff();
+  return <CategoriesManager />;
 }
