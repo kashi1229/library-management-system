@@ -180,12 +180,10 @@ export function CategoriesManager() {
         title={`Delete “${deleting?.name ?? ""}”?`}
         consequence={
           deleting && deleting.bookCount > 0
-            ? `This shelf holds ${deleting.bookCount} ${
+            ? `This shelf still holds ${deleting.bookCount} ${
                 deleting.bookCount === 1 ? "book" : "books"
-              }. Reassign or archive ${
-                deleting.bookCount === 1 ? "it" : "them"
-              } first — the library will not delete a category that is still in use.`
-            : "This cannot be undone. The library will still refuse if any book — an archived one included — still points at this shelf."
+              }. Reassign or archive ${deleting.bookCount === 1 ? "it" : "them"} before you delete this category. The library will not remove a shelf that is still in use.`
+            : "This cannot be undone. The library will still refuse while any book points at this shelf, including an archived book."
         }
         confirmLabel="Delete category"
         onConfirm={confirmDelete}
