@@ -1,10 +1,32 @@
 import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
 import { format, formatDistanceToNowStrict, isValid, parseISO } from "date-fns";
+
+/**
+ * Font-size tokens declared in the `@theme inline` block of `src/app/globals.css`.
+ * Keep in sync with that block — a token missing here is silently treated as a
+ * text colour by tailwind-merge, which then deletes the real colour class.
+ */
+const TYPE_SCALE = ["hero", "h1", "h2", "h3", "body", "small", "caption", "code"] as const;
+
+/**
+ * tailwind-merge only knows Tailwind's default `text-*` sizes, so custom tokens
+ * like `text-small` would be classified as text *colours*. Combining one with a
+ * real colour (e.g. `cn("text-primary-foreground", "text-small")`) then dropped the
+ * colour, leaving elements to inherit body text and fail WCAG AA contrast.
+ * Registering the tokens as font sizes keeps both classes intact.
+ */
+const mergeClasses = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      "font-size": [{ text: [...TYPE_SCALE] }],
+    },
+  },
+});
 
 /** Merge conditional class names, resolving Tailwind conflicts last-wins. */
 export function cn(...inputs: ClassValue[]): string {
-  return twMerge(clsx(inputs));
+  return mergeClasses(clsx(inputs));
 }
 
 type DateInput = Date | string | number | null | undefined;
