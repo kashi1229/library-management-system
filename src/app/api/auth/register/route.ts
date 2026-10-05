@@ -12,7 +12,7 @@ import { registerSchema } from "@/lib/validators/auth";
 import type { PublicUser } from "@/types";
 
 /**
- * POST /api/auth/register â€” public.
+ * POST /api/auth/register — public.
  *
  * Creates a **member** account only. There is deliberately no public path to
  * create staff: the first admin comes from the seed script (Unit 21), and

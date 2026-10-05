@@ -51,7 +51,7 @@ function Field({
               <label htmlFor={id} className="text-small font-medium text-foreground">
                 {label}
                 {required ? (
-                  <span className="ml-0.5 text-accent" aria-hidden="true">
+                  <span className="ml-0.5 text-accent-ink" aria-hidden="true">
                     *
                   </span>
                 ) : null}

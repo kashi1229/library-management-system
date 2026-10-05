@@ -5,7 +5,7 @@ import { User } from "@/models";
 import { changePasswordSchema } from "@/lib/validators/auth";
 
 /**
- * PATCH /api/auth/password â€” member+.
+ * PATCH /api/auth/password — member+.
  *
  * Requires the current password (F2). Audit logging is intentionally not used
  * here: a self-service password change is already visible via `updatedAt`, and

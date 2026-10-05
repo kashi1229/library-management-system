@@ -14,7 +14,7 @@ type BookCoverProps = {
   author?: string | null;
   /** Drives the fallback gradient and accent bar. */
   categoryColor?: CategoryColor | string | null;
-  /** Rendered width in px â€” keeps `next/image` from guessing. */
+  /** Rendered width in px — keeps `next/image` from guessing. */
   width?: number;
   className?: string;
   /** Accessible label; defaults to the book title. */
@@ -89,14 +89,14 @@ function GeneratedCover({
       />
       <p
         className={cn(
-          "line-clamp-5 font-display text-small font-semibold leading-tight tracking-[-0.01em] text-primary-foreground",
-          "line-clamp-5",
+          "line-clamp-5 font-display text-small font-semibold leading-tight tracking-[-0.01em]",
+          color.on,
         )}
       >
         {title}
       </p>
       {author ? (
-        <p className="line-clamp-2 text-caption text-primary-foreground/75">{author}</p>
+        <p className={cn("line-clamp-2 text-caption", color.on)}>{author}</p>
       ) : null}
     </div>
   );

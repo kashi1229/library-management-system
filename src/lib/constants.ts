@@ -120,17 +120,58 @@ export const CATEGORY_COLORS = [
 ] as const;
 export type CategoryColor = (typeof CATEGORY_COLORS)[number];
 
-/** Maps a category accent key to the matching Tailwind token class. */
-export const CATEGORY_COLOR_CLASS: Record<CategoryColor, { bg: string; text: string; ring: string }> = {
-  forest: { bg: "bg-cat-forest", text: "text-cat-forest", ring: "ring-cat-forest" },
-  terracotta: { bg: "bg-cat-terracotta", text: "text-cat-terracotta", ring: "ring-cat-terracotta" },
-  ocean: { bg: "bg-cat-ocean", text: "text-cat-ocean", ring: "ring-cat-ocean" },
-  plum: { bg: "bg-cat-plum", text: "text-cat-plum", ring: "ring-cat-plum" },
-  ochre: { bg: "bg-cat-ochre", text: "text-cat-ochre", ring: "ring-cat-ochre" },
-  slate: { bg: "bg-cat-slate", text: "text-cat-slate", ring: "ring-cat-slate" },
+/**
+ * Per-category utility classes.
+ *
+ * `on` is the theme-independent foreground for generated covers and other
+ * colour-filled surfaces. It cannot be `primary-foreground`, which flips with
+ * the theme and drops to 3.5:1 on terracotta (light) and 1.4:1 on forest (dark).
+ */
+export const CATEGORY_COLOR_CLASS: Record<
+  CategoryColor,
+  { bg: string; text: string; ring: string; on: string }
+> = {
+  forest: {
+    bg: "bg-cat-forest",
+    text: "text-cat-forest",
+    ring: "ring-cat-forest",
+    on: "text-cat-ink-light",
+  },
+  terracotta: {
+    bg: "bg-cat-terracotta",
+    text: "text-cat-terracotta",
+    ring: "ring-cat-terracotta",
+    on: "text-cat-ink-dark",
+  },
+  ocean: {
+    bg: "bg-cat-ocean",
+    text: "text-cat-ocean",
+    ring: "ring-cat-ocean",
+    on: "text-cat-ink-light",
+  },
+  plum: {
+    bg: "bg-cat-plum",
+    text: "text-cat-plum",
+    ring: "ring-cat-plum",
+    on: "text-cat-ink-light",
+  },
+  ochre: {
+    bg: "bg-cat-ochre",
+    text: "text-cat-ochre",
+    ring: "ring-cat-ochre",
+    on: "text-cat-ink-dark",
+  },
+  slate: {
+    bg: "bg-cat-slate",
+    text: "text-cat-slate",
+    ring: "ring-cat-slate",
+    on: "text-cat-ink-light",
+  },
 };
 
+/** Seed-friendly fallbacks, shared by the schema defaults and the seed script. */
 export const DEFAULT_CATEGORY_ICON = "BookOpen";
+export const DEFAULT_CATEGORY_COLOR: CategoryColor = "forest";
 
 /* -------------------------------------------------------------------------- */
 /* Routes                                                                      */

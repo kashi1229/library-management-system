@@ -43,9 +43,9 @@ type UploadState =
 /**
  * Cloudinary image uploader.
  *
- * Flow: validate locally â†’ ask the server to sign â†’ POST the file straight to
+ * Flow: validate locally → ask the server to sign → POST the file straight to
  * Cloudinary with `XMLHttpRequest` (the only browser API that reports upload
- * progress) â†’ hand the resulting `{url, publicId}` to `onChange`.
+ * progress) → hand the resulting `{url, publicId}` to `onChange`.
  *
  * The API secret is never involved on the client: only a short-lived signature
  * comes back from `POST /api/uploads/sign`.
@@ -287,7 +287,7 @@ export function ImageUploader({
         ) : null}
 
         <p className="text-caption text-muted-foreground">
-          {hint ?? `JPG, PNG or WebP Â· up to ${sizeLimit}MB`}
+          {hint ?? `JPG, PNG or WebP · up to ${sizeLimit}MB`}
         </p>
       </div>
 

@@ -83,7 +83,7 @@ export function AuthLayout({
             <p className="text-balance font-display text-3xl leading-[1.15] font-medium tracking-[-0.02em] text-primary-foreground xl:text-4xl">
               “A library is a quiet kind of magic.”
             </p>
-            <footer className="mt-4 text-small text-primary-foreground/65">
+            <footer className="mt-4 text-small text-primary-foreground/90">
               Every shelf here is a record of someone&rsquo;s curiosity.
             </footer>
           </blockquote>
@@ -91,7 +91,7 @@ export function AuthLayout({
           <BookSpines />
         </div>
 
-        <p className="relative text-caption text-primary-foreground/50">
+        <p className="relative text-caption text-primary-foreground/80">
           Cataloguing · Circulation · Reservations · Reports
         </p>
       </aside>

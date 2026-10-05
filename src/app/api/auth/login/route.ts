@@ -10,7 +10,7 @@ import { loginSchema } from "@/lib/validators/auth";
 import type { PublicUser } from "@/types";
 
 /**
- * POST /api/auth/login â€” public, rate-limited to 5 attempts / 10 min per IP+email.
+ * POST /api/auth/login — public, rate-limited to 5 attempts / 10 min per IP+email.
  *
  * Failure is deliberately indistinguishable between "no such email" and "wrong
  * password" so the endpoint cannot be used to enumerate accounts.

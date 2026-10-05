@@ -40,7 +40,7 @@ export const cloudinaryImageSchema = z.object({
 /**
  * Client-side guard, shared by the uploader before it asks for a signature.
  *
- * This is a fast UX check only â€” the real enforcement is Cloudinary's signed
+ * This is a fast UX check only — the real enforcement is Cloudinary's signed
  * `allowed_formats` and `max_file_size`, which the client cannot widen.
  */
 export const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;

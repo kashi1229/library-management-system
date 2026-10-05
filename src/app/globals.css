@@ -32,7 +32,9 @@
   --primary-soft: #e7edea;
 
   --accent: #c2703d;
-  --accent-foreground: #ffffff;
+  /* Dark warm ink, not white: #c2703d + #fff is only 3.7:1 and fails WCAG AA.
+     Matches the dark theme's accent-foreground so the pairing is consistent. */
+  --accent-foreground: #1a1009;
   --accent-soft: #f4e4d6;
 
   /* --- Status --------------------------------------------------------- */
@@ -78,6 +80,15 @@
   --cat-plum: #6b3e5e;
   --cat-ochre: #c98a1b;
   --cat-slate: #4a5560;
+
+  /* Cover ink for generated book covers. The category colours above are fixed
+     in :root and never overridden per theme, so their foregrounds must be fixed
+     too — a theme-dependent token lands cream on terracotta (3.5:1) in light mode
+     and dark ink on forest (1.4:1) in dark mode.
+     Light ink  -> forest 11.1:1, ocean 5.2:1, plum 7.9:1, slate 7.1:1
+     Dark ink   -> terracotta 5.1:1, ochre 6.4:1 */
+  --cat-ink-light: #faf7f2;
+  --cat-ink-dark: #1a1009;
 
   /* --- Typography scale (ui-context.md) -------------------------------- */
   --text-hero: clamp(2.5rem, 6vw, 4.5rem);
@@ -192,6 +203,8 @@
   --color-cat-plum: var(--cat-plum);
   --color-cat-ochre: var(--cat-ochre);
   --color-cat-slate: var(--cat-slate);
+  --color-cat-ink-light: var(--cat-ink-light);
+  --color-cat-ink-dark: var(--cat-ink-dark);
 
   --radius-xs: var(--radius-xs);
   --radius-sm: var(--radius-sm);

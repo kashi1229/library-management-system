@@ -16,7 +16,7 @@ export default function NotFound() {
     <main className="container-page flex flex-1 flex-col items-center justify-center gap-8 py-24 text-center">
       <Logo markOnly className="justify-center" />
       <div className="max-w-md space-y-3">
-        <p className="font-mono text-code text-accent">404</p>
+        <p className="font-mono text-code text-accent-ink">404</p>
         <h1 className="text-balance text-hero font-display font-semibold leading-[1.08] tracking-[-0.02em] text-foreground">
           This shelf is empty.
         </h1>
