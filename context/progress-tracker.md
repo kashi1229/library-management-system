@@ -292,6 +292,15 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
   and makes the delete fail — find it with
   `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` and stop the ones whose `CommandLine` matches
   `*next*`.
+- **Never delete `.next` while a dev server is already running** — including the developer's own, outside this
+  session. The process keeps the port but stops answering, so the browser shows the **404 page** on every
+  route while `curl` reports a refused connection and Windows still lists port 3000 as `Listen`. That
+  combination looks exactly like a routing bug and is not one. Check first with
+  `Get-NetTCPConnection -LocalPort 3000 -State Listen`, and if something is there, leave it alone.
+  The QA scripts in `%LOCALAPPDATA%\Temp\opencode\qa` now abort with exit code 2 in that case.
+- **A 404 page's text appears in *every* page's HTML**, because `not-found.tsx` ships in the shared client
+  payload. Asserting `"This shelf is empty" in html` is therefore not a 404 test — assert on the route's own
+  markers (`name="email"`, `<h1>Welcome back</h1>`) instead.
 - A background dev server dies between tool calls. Run the server start **and** the browser check inside a
   single command, otherwise the probe hits `ERR_CONNECTION_REFUSED`. `run-unit07.ps1` in the QA folder is the
   working pattern: clean `.next` → seed fixtures → start server → poll `/api/health` → API pass → browser
