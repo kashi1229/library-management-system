@@ -19,7 +19,7 @@ import {
 import { useCatalogFilters } from "@/hooks/use-catalog-filters";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { usePrefersReducedMotion } from "@/hooks/use-motion-variants";
-import { catalogApi } from "@/lib/api-client";
+import { catalogApi, type CatalogFilters } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type { CatalogBook, CatalogFacets } from "@/types";
 
@@ -47,23 +47,35 @@ export function CatalogBrowser({ facets }: { facets: CatalogFacets }) {
   const [view, setView] = useLocalStorage<CatalogView>("catalog:view", "grid");
   const [sheetOpen, setSheetOpen] = React.useState(false);
 
-  const key = `/catalog?${new URLSearchParams(searchKey(filters, PAGE_SIZE)).toString()}`;
-  const { data, error, isLoading } = useSWR(key, (signal?: AbortSignal) =>
-    catalogApi.list(
-      {
-        q: filters.q || undefined,
-        category: filters.category || undefined,
-        language: filters.language || undefined,
-        availability: filters.availability === "available" ? "available" : undefined,
-        yearFrom: filters.yearFrom,
-        yearTo: filters.yearTo,
-        sort: filters.sort,
-        page: filters.page,
-        limit: PAGE_SIZE,
-      },
-      signal,
-    ),
+  const query = React.useMemo<CatalogFilters>(
+    () => ({
+      q: filters.q || undefined,
+      category: filters.category || undefined,
+      language: filters.language || undefined,
+      availability: filters.availability === "available" ? "available" : undefined,
+      yearFrom: filters.yearFrom,
+      yearTo: filters.yearTo,
+      sort: filters.sort,
+      page: filters.page,
+      limit: PAGE_SIZE,
+    }),
+    [
+      filters.q,
+      filters.category,
+      filters.language,
+      filters.availability,
+      filters.yearFrom,
+      filters.yearTo,
+      filters.sort,
+      filters.page,
+    ],
   );
+
+  // `/catalog?…` rather than the bare query string: an empty-string key means
+  // "do not fetch" to SWR, which is how Unit 08's table rendered "0 books" over a
+  // full catalog. The pathname prefix guarantees a truthy key.
+  const key = `/catalog?${new URLSearchParams(searchKey(filters, PAGE_SIZE)).toString()}`;
+  const { data, error, isLoading } = useCatalogResults(key, query);
 
   const books = data?.data.items ?? [];
   const meta = data?.meta;
@@ -233,11 +245,48 @@ export function CatalogBrowser({ facets }: { facets: CatalogFacets }) {
 }
 
 /**
+ * Fetch the current page of catalog results, keyed on the filters.
+ *
+ * **The fetcher takes no parameters, and that is load-bearing.** SWR invokes
+ * `fetcher(key)`, so a fetcher declared `(signal?: AbortSignal) => …` receives the
+ * *string key* in that position and hands it to `fetch` as `signal`:
+ *
+ *   Failed to read the 'signal' property from 'RequestInit': Failed to convert
+ *   value to 'AbortSignal'.
+ *
+ * This is the **same bug Unit 08 hit and fixed** on the staff books table, and it was
+ * reintroduced verbatim here. It is invisible to `tsc`, to `eslint` and to
+ * `next build` — the page server-renders a correct-looking shell with "0 books" and
+ * only the client-side fetch fails, so a plain HTTP check on `/catalog` returns 200 and
+ * a healthy-looking 77KB of HTML. Everything renders except the results, and the error
+ * surfaces as a user-facing "The catalog could not be reached".
+ *
+ * Cancellation is therefore wired by hand: an in-flight request for a superseded
+ * filter is aborted rather than left to race the new one and overwrite it, which the
+ * cache key alone does not guarantee.
+ */
+function useCatalogResults(key: string, query: CatalogFilters) {
+  const controllerRef = React.useRef<AbortController | null>(null);
+
+  return useSWR(key, async () => {
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+
+    try {
+      return await catalogApi.list(query, controller.signal);
+    } finally {
+      // Only the newest request owns the slot; a slow earlier one must not clear the
+      // handle belonging to the request that replaced it.
+      if (controllerRef.current === controller) controllerRef.current = null;
+    }
+  });
+}
+/**
  * Build the SWR key from the filters.
  *
  * Separate from the fetch so the key and the request can never disagree about what
- * is being asked for — the exact bug Unit 08 shipped when the key was derived
- * separately from the query.
+ * is being asked for — Unit 08 shipped a bug when the two were derived independently.
  */
 function searchKey(filters: ReturnType<typeof useCatalogFilters>, limit: number) {
   const params = new URLSearchParams();

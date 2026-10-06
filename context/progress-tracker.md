@@ -322,6 +322,40 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - **A revoked blob URL latched forever** — `preview` was set once and never cleared, so after the first
   upload the preview pointed at a dead object URL and masked the real image.
 
+### Unit 09 — bugs found after the developer reported an empty `/catalog`
+The developer came back with "why doesn't /catalog show the books". Both causes were mine,
+and **both were invisible to `tsc`, `eslint` and `next build`**, and the first one also
+survived a plain HTTP check because the page server-renders a healthy-looking shell.
+
+- **The catalog never fetched anything — the Unit 08 SWR bug, reintroduced verbatim.**
+  The fetcher was `(signal?: AbortSignal) => catalogApi.list(query, signal)`, but **SWR calls
+  `fetcher(key)`**, so `signal` received the *string cache key* and it went straight into
+  `fetch`:
+  `Failed to read the 'signal' property from 'RequestInit': Failed to convert value to 'AbortSignal'`.
+  No request was ever issued; the page showed "The catalog could not be reached" with the raw
+  browser error as the description. Unit 08 hit this exact bug on the staff table, wrote a
+  warning about it, and I wrote it again an hour later. Fixed with the same hand-rolled
+  `AbortController` (the fetcher takes **no parameters**), and both call sites now carry the
+  note.
+  - **Why nothing caught it:** `Invoke-WebRequest /catalog` returns **200 with 77KB of
+    correct-looking HTML** — the heading, the search box, the whole filter panel with live
+    facet counts — because those are all server-rendered. Only the results are client-fetched,
+    so an HTTP status check and a build both pass while the page is functionally empty. The
+    earlier verification only asserted on status codes and bytes, which is exactly the
+    assertion shape that cannot see this class of bug.
+- **`effectiveAvailable` was missing from the default list, so every card read "NaN of 1
+  available".** I attached it in the `availability=available` branch and in
+  `listRelatedBooks`, and forgot it in the ordinary paginated branch. Two compounding causes:
+  1. `listBooks` declared its return type as `BookListItem[]`, which does **not** include
+     `effectiveAvailable`, so nothing downstream was type-checked against the field the
+     catalog actually reads. `CatalogBook` is now the declared return type.
+  2. The field was attached at **three** call sites rather than in one serialiser, so
+     adding it anywhere meant remembering to add it everywhere else. Every list result now
+     leaves through one `serialiseAll`.
+  - The earlier check passed because it asserted on `?availability=available`, which is the
+     one branch that happened to be correct. **A check that only exercises the branch you just
+     wrote is not a check of the feature.**
+
 ### Unit 09 — bugs found by build and smoke check
 - **`container-page` had no working max-width on any page.** The `@utility` block read
   `max-width: var(--container-7xl)` and `--container-7xl` was never declared, so the
@@ -560,6 +594,16 @@ Reported by the developer after the first commit, then verified in the browser:
   yields a number to react-hook-form; a `z.string()` field then fails its own resolver.
 - **Filter history is per-kind:** discrete filter changes `push`, a debounced search box `replace`s.
 - **SWR cache keys must never be empty** — an empty-string key means "do not fetch".
+- **SWR calls `fetcher(key)`, so a fetcher must declare no positional parameters.** Declaring
+  `(signal?: AbortSignal) => …` receives the *string key* and hands it to `fetch`, which
+  throws *"Failed to convert value to 'AbortSignal'"*. This bit the staff table in Unit 08 and
+  the catalog in Unit 09; cancellation is wired by hand with an `AbortController`.
+- **A list endpoint must have exactly one serialisation path.** Attaching a derived field at
+  three call sites means adding it everywhere next time. One `serialiseAll`, and the return
+  type declares the derived fields so omitting one is a compile error.
+- **A client-fetched region is invisible to an HTTP status check.** `/catalog` returns 200
+  with a complete-looking shell while the results are client-side only. Assert on the rendered
+  result — a card count, a row of titles — not on a status code and a byte length.
 - Animation imports from `motion/react`; all timings live in `src/lib/motion.ts`.
 - Status colours ship as `-soft` tint + `-ink` foreground pairs to satisfy WCAG 2.2 AA.
 - Custom form controls receive `className` on the **input**, not a wrapper, so icon padding composes.

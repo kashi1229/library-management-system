@@ -37,6 +37,7 @@ export type { BookDetail, BookSummary } from "@/types";
 import type {
   BookDetail,
   BookSummary,
+  CatalogBook,
   CatalogBookDetail,
   CatalogFacets,
   UserBookState,
@@ -248,7 +249,7 @@ export async function getReadyHoldCounts(
  */
 async function withAvailability(
   items: BookListItem[],
-): Promise<Array<BookListItem & { effectiveAvailable: number }>> {
+): Promise<CatalogBook[]> {
   const holds = await getReadyHoldCounts(
     items.map((book) => new Types.ObjectId(book._id)),
   );
@@ -267,9 +268,13 @@ async function withAvailability(
  *
  * `status` defaults to `active` for the public catalog and `all` for the staff
  * table (the two call sites pass different defaults).
+ *
+ * Returns `CatalogBook`, **not** `BookListItem`, so `effectiveAvailable` is part of
+ * the declared contract. Declaring the narrower type is what let the field be
+ * attached on one branch and omitted on another without a single compiler complaint.
  */
 export async function listBooks(query: ListBooksQuery): Promise<{
-  items: BookListItem[];
+  items: CatalogBook[];
   meta: { page: number; limit: number; total: number; totalPages: number };
 }> {
   const { filter, sort } = buildQuery(query);
@@ -313,13 +318,12 @@ export async function listBooks(query: ListBooksQuery): Promise<{
       .lean(),
   ]);
 
-  const categories = await categoryMap([
-    ...new Set(docs.map((doc) => doc.category as Types.ObjectId)),
-  ]);
-
-  const items = docs.map((doc) =>
-    toApi(doc as unknown as Record<string, unknown>, categories.get(String(doc.category)) ?? null),
-  );
+  // Through `serialiseAll`, like the availability branch above. Returning the raw
+  // `toApi` result here is how `effectiveAvailable` ended up missing from the
+  // **default** list while working in the filtered one — so the catalog rendered
+  // "NaN of 1 available" on every card and the check that passed was the one that
+  // happened to take the other branch. One serialisation path for every result set.
+  const items = await serialiseAll(docs as unknown as Array<Record<string, unknown>>);
 
   return {
     items,
@@ -327,17 +331,20 @@ export async function listBooks(query: ListBooksQuery): Promise<{
   };
 }
 
-/** Serialise a whole result set in one go, with `effectiveAvailable` attached. */
+/**
+ * Serialise a whole result set, with `effectiveAvailable` attached.
+ *
+ * The single exit for list results, so a new field cannot be attached on one branch
+ * and forgotten on another.
+ */
 async function serialiseAll(
   docs: Array<Record<string, unknown>>,
-): Promise<Array<BookListItem & { effectiveAvailable: number }>> {
+): Promise<CatalogBook[]> {
   const categories = await categoryMap([
     ...new Set(docs.map((doc) => doc.category as Types.ObjectId)),
   ]);
 
-  const items = docs.map((doc) =>
-    toApi(doc, categories.get(String(doc.category)) ?? null),
-  );
+  const items = docs.map((doc) => toApi(doc, categories.get(String(doc.category)) ?? null));
 
   return withAvailability(items);
 }
@@ -437,7 +444,7 @@ export const ANONYMOUS_USER_BOOK_STATE: UserBookState = Object.freeze({
 export async function listRelatedBooks(
   idOrSlug: string,
   max = 6,
-): Promise<Array<BookListItem & { effectiveAvailable: number }>> {
+): Promise<CatalogBook[]> {
   const book = await findBook(idOrSlug);
 
   const docs = await Book.find({
