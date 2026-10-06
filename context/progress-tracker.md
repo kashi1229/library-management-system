@@ -3,15 +3,69 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management and public catalog.**
-  Units 01–09 complete. Units 10 → 21 in progress per the developer's instruction to
+- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, and members/team.**
+  Units 01–10 complete. Units 11 → 21 in progress per the developer's instruction to
   complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 10 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- Next unit: **10 — Members & Team Management**.
+- Build Units 11 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- Next unit: **11/12 — Circulation** (issue, return, renew, due-soon and overdue queues).
 
 ## Completed
+
+### Unit 10 — Members & Team Management ✅ · `feat/10-members-team`
+- `lib/validators/members.ts` — `listMembersQuerySchema`, `lookupQuerySchema`,
+  `suspendMemberSchema`, `createLibrarianSchema`, `updateTeamMemberSchema`, `memberIdSchema`.
+  `createLibrarianSchema` **reuses `emailSchema` / `passwordSchema`** from
+  `lib/validators/auth.ts` so a staff account and a member registration cannot drift on what
+  counts as valid. `updateTeamMemberSchema` is a plain object + `.refine()` rather than
+  `.extend()` on a refined schema — the Unit 09 Zod 4 trap.
+- `lib/services/members.ts` — `listMembers` (escaped regex across name/email/membership ID,
+  one `$facet`-free count + page so `meta.total` is honest), `getMemberDetail`,
+  `lookupMembers` (capped at 8, **active members sort first**), `suspendMember`,
+  `activateMember` (**idempotent** — reinstating an active member succeeds without a second
+  audit row or a duplicate notification), `resetPassword`.
+  - Suspension always carries a **reason**, stored, audited and notified. Activate **clears**
+    the reason, because leaving it would keep showing a stale explanation on the member's
+    banner after the problem was fixed.
+  - `resetPassword` is the only place a plaintext exists: it is hashed and returned once,
+    never stored, never logged, never placed in an audit `before`/`after`.
+- `lib/services/team.ts` — `listTeam`, `createLibrarian`, `updateTeamMember`.
+  - **`membershipId` is omitted entirely for staff**, not set to `null`. A sparse unique index
+    treats an absent field as absent but a stored `null` as a value, so a `null` would limit
+    the library to one staff account. This is the first code path that creates a staff user,
+    and it is the first exercise of that rule.
+  - **Role is not editable**, and an admin cannot change their own status or disable the
+    **last active admin** — both would leave nobody able to restore staff accounts.
+  - Duplicate email returns a **field** error, not a 500.
+- Routes: `GET/POST /api/members`, `GET /api/members/:id`, `GET /api/members/lookup`,
+  `POST /api/members/:id/{suspend,activate,reset-password}`, `GET/POST /api/team`,
+  `PATCH /api/team/:id`. Matches the contract already in `api-contract.md` §Members & Team.
+- **`src/lib/password-generator.ts`** — new client-safe module. The temporary password is
+  generated **in the browser** so an admin reads it before committing (a mistyped email is
+  caught before the account exists) and again server-side on reset, from **one** implementation
+  so the alphabet and the letter/digit guarantee cannot drift. Uses `crypto.getRandomValues`
+  with rejection sampling (no modulo bias) because this value is a credential; excludes
+  `0 O 1 l I` because these are read off a screen once and typed by hand.
+- `lib/auth/password.ts` now holds only hashing; it re-exports the generator.
+- **UI** — `/staff/members`: `MembersManager` (URL-synced search + Active/Suspended tabs,
+  `aria-live` count, server-driven pagination, error and empty states), `MembersTable` (one
+  component renders the desktop `<table>` and the stacked mobile cards from the same data),
+  `MemberRowActionMenu` (destructive action swaps with status instead of sitting disabled),
+  `SuspendDialog` (reason is required and is the point of the dialog), `ResetPasswordDialog`
+  (confirm → reveal-once with copy, and it says so).
+  `/staff/members/[id]`: `MemberHeader` (identity, status, the suspension reason, four KPI
+  `StatCard`s) + `MemberTabs` (Overview real; Loans/Fines/Reservations **name the unit that
+  will fill them** rather than rendering a blank panel).
+  `/staff/team`: `TeamManager` + `AddLibrarianDialog` (generates the password, validate as you
+  type, one scrolling region with a pinned footer per the Unit 07 rule).
+- `src/hooks/use-member-filters.ts` follows Unit 08's **focus-owns-the-value** rule and the
+  per-kind history rule rather than rediscovering them.
+- **The detail page needs no serialisation step**: `getMemberDetail` reads `.lean()` and maps
+  through `toMember`, so it already returns a plain object — unlike Unit 08's `listCategories`.
+- Verification per the developer's instruction to keep it light: `tsc`, `eslint` and
+  `next build` all clean, all 11 routes present. **Not** browser- or API-verified against a
+  live database.
 
 ### Unit 01 — Bootstrap & Design System ✅ · `feat/01-bootstrap-design-system`
 - Restructured to `src/` with the `@/*` → `./src/*` alias, matching `architecture.md`.
@@ -169,9 +223,12 @@ Update this file after every meaningful implementation change.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **10** Members & Team → **11/12** Circulation → **13** Fines →
-   **14** Reservations → **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards →
+1. **11/12** Circulation → **13** Fines → **14** Reservations →
+   **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards →
    **18** Reports & Audit → **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
+   - **Unit 11/12 needs a Mongo replica set.** Issue, return and reserve-promote run in
+     transactions, and the current local instance is standalone. This is the first unit that
+     cannot be verified until `MONGODB_URI` points at a replica set.
 
 ### Unit 09 — Public Catalog & Book Detail ✅
 - `src/app/(public)/layout.tsx` — a public shell deliberately **not** `AppShell`: a visitor
@@ -541,12 +598,66 @@ Reported by the developer after the first commit, then verified in the browser:
     `Get-Content -Raw` + `Set-Content`.** It reads as the system ANSI codepage, so every non-ASCII character
     is corrupted and a BOM is added. Use the editor tools instead.
 
+### Unit 10 — bugs found by the build and by reading the code
+- **`server-only` leaked into the client bundle again.** `validators/members.ts` imported
+  `isValidMembershipId` from `lib/services/membership.ts`, which is `server-only` and imports
+  `mongoose`. The suspend dialog and the member forms import that validator, so the build
+  pulled mongoose and the whole driver into the browser. `tsc` and `eslint` both passed —
+  **only `next build` caught it**, the same shape as the Unit 06 Cloudinary split. Fixed by
+  moving the *format* into a new client-safe `lib/membership-id.ts`, which the service now
+  imports, so generation stays server-side and the pattern is reachable from both sides. The
+  general rule: a validator is client code, so **nothing it imports may be `server-only`.**
+- **The generated password could index past the end of its alphabet.** The first version built
+  one combined `ALPHABET` string and then called `randomIndex(52)` for a letter and
+  `randomIndex(10)` for a digit. The alphabet has 52 letters and 8 digits, so the digit index
+  range was 52–61 against a 60-character string — **two of ten draws returned `undefined`**,
+  producing a 9-character password that failed the very policy it was generated to satisfy.
+  Nothing catches this: `charAt`/indexing returns `undefined` rather than throwing, and the
+  result is a valid `string` after `join`. Fixed with explicit `FIRST_DIGIT_INDEX` bounds and a
+  Fisher-Yates shuffle so the guaranteed letter/digit are not always in the same positions.
+- **A failed password reset was completely silent.** `ResetPasswordDialog` held the error in
+  component state, but `ConfirmDialog` **always** calls `onOpenChange(false)` once `onConfirm`
+  settles — so the state was unmounted before it ever painted and the dialog just closed,
+  looking like nothing had happened. Now a toast. The general rule: a caller of `ConfirmDialog`
+  **cannot** surface an error inline, because it has already been unmounted by the time it
+  would render.
+- **A hard-coded `maxActiveLoans` in the members table.** `LoanCount` escalated the badge tone
+  at `count >= 5`, duplicating `SETTINGS_DEFAULTS.maxActiveLoans`. That number is editable at
+  runtime by an admin (invariant 7), so the component would have been correct only until
+  someone changed the policy, and would then have warned on the wrong members — worse than not
+  warning. There is no client-side settings accessor yet, so the tone is uniform and the
+  threshold is left to land with one.
+- **`StatCard` takes a component, not an element.** Four KPI tiles were first written
+  `icon={<IdCard className="size-4" />}`; the prop is `React.ComponentType<…>`, so the JSX
+  element failed to type-check. Worth knowing because passing an element *would* work at
+  runtime for most icons and silently lose the size/stroke defaults the component applies.
+- **`AuthenticatedUser.id` is a `Types.ObjectId`, not a string.** The team page passed it
+  straight to a client component whose rows are keyed by string ids, so the "is this you?"
+  comparison would never have matched and the admin could have been offered the action that
+  disables themselves. `.toString()` at the boundary, not an `as string` cast.
+
+### Unit 10 — deliberately not done
+- **No browser or live-database verification**, per the developer's instruction to keep this
+  unit to static and build checks. The gates run were `tsc`, `eslint` and `next build`.
+  The suspension path, the reset-password reveal, the last-admin guards and the duplicate-email
+  error are all therefore **unproven at runtime** — see Unit 21.
+- `GET /api/members/lookup` is built and returns real rows, but nothing consumes it yet. It
+  exists for the Unit 11/12 circulation desk, which is the only screen that needs type-ahead.
+
 ## In Progress
-- Unit 10 — Members & Team Management. Not started. Needs `GET/POST /api/members`,
-  `GET /api/members/:id`, `GET /api/members/lookup`, suspend/activate, reset-password, and
-  the admin-only `GET/POST /api/team`, `PATCH /api/team/:id`. Note that `POST /api/team`
-  is the first code path that creates a **staff** user, so it is the first exercise of the
-  `membershipId`-has-no-default rule fixed in Unit 08.
+- Unit 11/12 — Circulation. Not started. Needs `GET /api/loans` with `status`, `memberId`,
+  `bookId`, `from`, `to`, `page`; `POST /api/loans/issue`; `POST /api/loans/:id/return`;
+  `POST /api/loans/:id/renew`; and the desk UI with member lookup, availability re-check and
+  the due-soon / overdue queues.
+  - **`lookupMembers` from Unit 10 is already built for this** — the `GET /api/members/lookup`
+    type-ahead returns up to 8 lightweight rows with active-loan counts, which is exactly what
+    an issue form needs. Do not build a second lookup.
+  - All three mutations run in `withTransaction()`, so they need a **replica set**. The
+    local `MONGODB_URI` is standalone and will reject them.
+  - Copy arithmetic must be the **delta** approach Unit 08 established, and
+    `availableCopies <= totalCopies` is guarded by a model pre-validate hook.
+  - Renewals are bounded by `maxRenewals` and extended by `renewalExtensionDays`; both come
+    from the settings singleton, never from a constant (invariant 7).
 
 ## Open Questions
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
@@ -618,6 +729,20 @@ Reported by the developer after the first commit, then verified in the browser:
   height cap and centres itself with `translate-y-[-50%]`, so any dialog over ~1000px pushes its own
   footer off-screen on a laptop with no way to scroll to it. Long *pages* use the same idea with a
   `fixed` action footer and matching `pb-32` on the form.
+- **A validator is client code.** Nothing a file in `lib/validators/` imports may be `server-only`,
+  because client forms import those schemas. Put the *rule* in a client-safe module and have the
+  server service import it (`lib/membership-id.ts`), rather than the reverse. This is the same
+  class of bug as the Unit 06 `cloudinary-shared` split, and it is only visible to `next build`.
+- **A caller of `ConfirmDialog` cannot show an inline error.** It closes itself as soon as
+  `onConfirm` settles, so any error state is unmounted before it paints. Report failures with a
+  toast, or use a controlled `Dialog`.
+- **A generated credential must be verified against its own validator.** A one-off alphabet with
+  index ranges that do not line up produces `undefined` characters and a value that is too short,
+  and neither a compiler nor an index access will complain. Generate from one module, bound the
+  ranges explicitly, and prefer a rejection-sampled CSPRNG over `Math.random`.
+- **Never hard-code a policy threshold in a component.** `maxActiveLoans`, `maxRenewals` and the
+  fine limits are editable at runtime (invariant 7). Until a client-side settings accessor exists,
+  show the number without threshold-dependent tone rather than showing it against a stale constant.
 - **Never unmount a form's only submit button.** A form with no submit button falls into the
   implicit-submission path, where a real mouse click on a `type="button"` inside it submits anyway. Keep the
   submit button mounted and disable it instead of swapping it out. Related: `el.click()` does not

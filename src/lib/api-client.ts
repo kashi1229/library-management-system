@@ -1,7 +1,7 @@
 import type { NextResponse } from "next/server";
 import type { ApiFailure, ApiSuccess } from "@/lib/api";
 import type { FieldErrors } from "@/lib/api";
-import type { BookSort, BookAvailability, CategoryColor } from "@/lib/constants";
+import type { BookSort, BookAvailability, CategoryColor, UserStatus } from "@/lib/constants";
 import type { CategoryIconName } from "@/lib/validators/category";
 import type { BookStatusFilter, PublicBookSort } from "@/lib/validators/book";
 import type {
@@ -320,6 +320,100 @@ export const catalogApi = {
 
   related: (idOrSlug: string, signal?: AbortSignal) =>
     request<{ items: CatalogBook[] }>(`/books/${idOrSlug}/related`, { signal }).then((d) => d.items),
+};
+
+/* -------------------------------------------------------------------------- */
+/* Members & team                                                             */
+/* -------------------------------------------------------------------------- */
+
+/** A member row: the user plus the one count the table shows. */
+export type MemberSummary = PublicUser & {
+  /** Loans currently out. */
+  activeLoans: number;
+};
+
+/** Member detail: `MemberSummary` plus the four numbers the KPI row shows. */
+export type MemberDetail = MemberSummary & {
+  /** Every loan ever, returned or not. */
+  totalBorrowed: number;
+  unpaidFines: number;
+  /** `waiting` + `ready`. */
+  activeReservations: number;
+  /** Outstanding fine total in currency units, not a count. */
+  unpaidFineTotal: number;
+};
+
+/** A librarian or admin. `PublicUser` already carries the role and status. */
+export type TeamMember = PublicUser;
+
+/** Every filter the members table can send, mirroring `listMembersQuerySchema`. */
+export type MemberListFilters = {
+  q?: string;
+  status?: UserStatus;
+  page?: number;
+  limit?: number;
+};
+
+export type CreateLibrarianInput = {
+  name: string;
+  email: string;
+  /** Must satisfy the shared password policy. */
+  password: string;
+  phone?: string;
+};
+
+/**
+ * The one and only time a temporary password exists in plaintext.
+ *
+ * It is never stored and never logged, so this response is the only chance to show
+ * it. Every type here should keep reminding the UI of that.
+ */
+export type PasswordResetResult = {
+  user: PublicUser;
+  temporaryPassword: string;
+};
+
+export const membersApi = {
+  list: (filters: MemberListFilters = {}, signal?: AbortSignal) =>
+    requestWithMeta<{ items: MemberSummary[] }>("/members", { query: filters, signal }),
+
+  get: (id: string, signal?: AbortSignal) =>
+    request<{ member: MemberDetail }>(`/members/${id}`, { signal }).then((d) => d.member),
+
+  /** Circulation desk type-ahead. Capped at 8 server-side. */
+  lookup: (q: string, signal?: AbortSignal) =>
+    request<{ items: MemberSummary[] }>("/members/lookup", { query: { q }, signal }).then(
+      (d) => d.items,
+    ),
+
+  suspend: (id: string, reason: string) =>
+    request<{ member: PublicUser }>(`/members/${id}/suspend`, {
+      method: "POST",
+      body: { reason },
+    }).then((d) => d.member),
+
+  activate: (id: string) =>
+    request<{ member: PublicUser }>(`/members/${id}/activate`, { method: "POST" }).then(
+      (d) => d.member,
+    ),
+
+  /** Returns the temporary password once; it cannot be retrieved again. */
+  resetPassword: (id: string) =>
+    request<PasswordResetResult>(`/members/${id}/reset-password`, { method: "POST" }),
+};
+
+export const teamApi = {
+  list: (signal?: AbortSignal) =>
+    request<{ items: TeamMember[] }>("/team", { signal }).then((d) => d.items),
+
+  create: (input: CreateLibrarianInput) =>
+    request<{ member: TeamMember }>("/team", { method: "POST", body: input }).then((d) => d.member),
+
+  /** Name and/or status. `role` is deliberately not accepted. */
+  update: (id: string, input: { name?: string; status?: UserStatus }) =>
+    request<{ member: TeamMember }>(`/team/${id}`, { method: "PATCH", body: input }).then(
+      (d) => d.member,
+    ),
 };
 
 export const categoriesApi = {

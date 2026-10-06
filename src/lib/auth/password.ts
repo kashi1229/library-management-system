@@ -6,6 +6,10 @@ import bcrypt from "bcryptjs";
  *
  * Wrapped in one module so the cost factor is defined in exactly one place and
  * `passwordHash` never has to be handled by a caller.
+ *
+ * The temporary-password **generator** lives in `lib/password-generator.ts` instead,
+ * because the "Add librarian" dialog generates one in the browser and both sides must
+ * produce the same shape. That module is not `server-only` and does not import this one.
  */
 
 const BCRYPT_COST = 10;
@@ -26,3 +30,5 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
     return false;
   }
 }
+
+export { generateTempPassword, TEMP_PASSWORD_LENGTH } from "@/lib/password-generator";
