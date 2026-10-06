@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  BOOK_AVAILABILITIES,
   BOOK_SORTS as BOOK_SORTS_CONST,
   BOOK_SORT_LABELS,
   BOOK_STATUSES,
@@ -299,6 +300,16 @@ export const updateBookSchema = z
 export const BOOK_SORTS = BOOK_SORTS_CONST;
 export type { BookSort };
 
+/**
+ * The four sorts that mean something to a reader.
+ *
+ * A strict subset of `BOOK_SORTS`, derived from it rather than hand-written so the
+ * two cannot disagree. `oldest` and `authors` are staff-only conveniences; offering
+ * a visitor "Oldest first" on a catalog page is noise.
+ */
+export const PUBLIC_BOOK_SORTS = ["newest", "title", "popular", "rating"] as const satisfies readonly BookSort[];
+export type PublicBookSort = (typeof PUBLIC_BOOK_SORTS)[number];
+
 /** The staff table also needs `all`, which the public catalog has no use for. */
 export const BOOK_STATUS_FILTERS = ["active", "archived", "all"] as const;
 export type BookStatusFilter = (typeof BOOK_STATUS_FILTERS)[number];
@@ -319,20 +330,56 @@ const limitQuery = z.coerce
   .optional()
   .default(PAGINATION.defaultLimit);
 
-/** `GET /api/books` — public in Unit 09, staff-only status filter from Unit 08. */
-export const listBooksQuerySchema = z.object({
-  q: z.string().trim().max(120).optional(),
-  category: z.string().regex(/^[a-f\d]{24}$/i).optional(),
-  language: z.string().trim().max(60).optional(),
-  status: z.enum(BOOK_STATUS_FILTERS).optional().default("active"),
-  sort: z.enum(BOOK_SORTS).optional().default("newest"),
-  page: pageQuery,
-  limit: limitQuery,
+/**
+ * `GET /api/books` — shared by the staff table (Unit 08) and the public catalog.
+ *
+ * `availability`, `yearFrom` and `yearTo` are catalog-only, but they live on the
+ * one query schema so a single `buildQuery` serves both callers. The staff table
+ * simply never sends them.
+ */
+export const listBooksQuerySchema = z
+  .object({
+    q: z.string().trim().max(120).optional(),
+    category: z.string().regex(/^[a-f\d]{24}$/i).optional(),
+    language: z.string().trim().max(60).optional(),
+    /** `available` keeps only books a reader could actually borrow today. */
+    availability: z.enum(BOOK_AVAILABILITIES).optional(),
+    yearFrom: z.coerce.number().int().min(1000).max(3000).optional(),
+    yearTo: z.coerce.number().int().min(1000).max(3000).optional(),
+    status: z.enum(BOOK_STATUS_FILTERS).optional().default("active"),
+    sort: z.enum(BOOK_SORTS).optional().default("newest"),
+    page: pageQuery,
+    limit: limitQuery,
+  })
+  // An inverted range would silently return nothing, which reads as a bug rather
+  // than as the user swapping two sliders. Rejecting it names the real problem.
+  .refine((value) => value.yearFrom === undefined || value.yearTo === undefined || value.yearFrom <= value.yearTo, {
+    message: "The earliest year must not be after the latest.",
+    path: ["yearFrom"],
+  });
+
+/**
+ * Staff table filter: a concrete status or `all`.
+ *
+ * `safeExtend`, not `extend`: Zod 4 refuses `.extend()` on a schema that carries a
+ * refinement, because extending it could invalidate the refinement's assumptions.
+ * `listBooksQuerySchema` has the inverted-year-range check, so `.extend()` threw at
+ * **runtime** — `tsc` and `eslint` were both perfectly happy and only
+ * `next build` failed, during page-data collection.
+ */
+export const staffBooksQuerySchema = listBooksQuerySchema.safeExtend({
+  status: z.enum(BOOK_STATUS_FILTERS).optional().default("all"),
 });
 
-/** Staff table filter: a concrete status or `all`. */
-export const staffBooksQuerySchema = listBooksQuerySchema.extend({
-  status: z.enum(BOOK_STATUS_FILTERS).optional().default("all"),
+/**
+ * `GET /api/books/facets` — what the filter panel offers.
+ *
+ * The category id is validated here rather than being ignored, so a hand-edited
+ * URL that asks for facets of a deleted category is a 422 instead of a filter
+ * panel showing a category that can never match anything.
+ */
+export const facetsQuerySchema = z.object({
+  category: z.string().regex(/^[a-f\d]{24}$/i).optional(),
 });
 
 /** `GET /api/books/:slugOrId` and `DELETE /api/books/:id`. */

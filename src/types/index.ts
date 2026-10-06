@@ -278,6 +278,51 @@ export type BookDetail = BookSummary & {
   waitingReservations: number;
 };
 
+/**
+ * A book as the **public catalog** sees it (F5).
+ *
+ * `effectiveAvailable` is `availableCopies` minus copies promised to *ready*
+ * reservations. Those two numbers are deliberately different: a copy held for 48h
+ * for the next person in the queue is not available to anyone else, so a catalog
+ * that showed `availableCopies` would promise a book that cannot be collected.
+ * Rule 6 in `architecture.md`.
+ */
+export type CatalogBook = BookSummary & {
+  effectiveAvailable: number;
+};
+
+/** What the signed-in user has in flight for one book, for the detail actions. */
+export type UserBookState = {
+  wishlisted: boolean;
+  /** The member currently has an active loan of this book. */
+  activeLoan: boolean;
+  /** Reservation status (`waiting`/`ready`) or `null` when they have none. */
+  reservation: ReservationStatus | null;
+};
+
+/** Public catalog detail: everything a reader needs to decide, nothing they can't use. */
+export type CatalogBookDetail = CatalogBook & {
+  /** People waiting ahead of them. Drives "All copies out · N waiting". */
+  queueLength: number;
+  userState: UserBookState;
+};
+
+/** Category counts + the languages actually present, for the catalog filter panel. */
+export type CatalogFacets = {
+  categories: Array<{
+    _id: string;
+    name: string;
+    slug: string;
+    icon: string;
+    color: CategoryColor;
+    /** Active books in this category, regardless of the other active filters. */
+    count: number;
+  }>;
+  languages: string[];
+  /** Widest publication year present, so the year range slider can be bounded. */
+  yearRange: { from: number; to: number };
+};
+
 /** Safe user projection — `passwordHash` must never appear. */
 export type PublicUser = {
   id: string;

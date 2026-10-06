@@ -230,6 +230,19 @@
   --text-code: var(--text-code);
 
   --radius: var(--radius-md);
+
+  /*
+   * Declared so `container-page`'s `max-width: var(--container-7xl)` resolves.
+   *
+   * It was referenced by the `@utility container-page` block but never defined, so
+   * the declaration was invalid at computed-value time and every page using the
+   * utility had `max-width: none`. Invisible up to 1280px (the viewport is the
+   * constraint anyway) and wrong on every larger screen, which is why it survived
+   * seven units of responsive QA.
+   *
+   * 80rem = 1280px, matching the `max-w-7xl` container in `code-standards.md`.
+   */
+  --container-7xl: 80rem;
 }
 
 /* ==========================================================================

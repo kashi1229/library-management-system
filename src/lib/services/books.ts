@@ -1,7 +1,7 @@
 import "server-only";
 import { Types } from "mongoose";
 import { AppError } from "@/lib/api";
-import { Book, Category, Loan, Reservation } from "@/models";
+import { Book, Category, Loan, Reservation, Wishlist } from "@/models";
 import { logAudit } from "@/lib/services/audit";
 import { destroyAsset } from "@/lib/cloudinary";
 import { slugify } from "@/lib/validators/category";
@@ -34,7 +34,13 @@ import type { Actor, BookDoc, CloudinaryImage } from "@/types";
  * component a type error with no obvious cause.
  */
 export type { BookDetail, BookSummary } from "@/types";
-import type { BookDetail, BookSummary } from "@/types";
+import type {
+  BookDetail,
+  BookSummary,
+  CatalogBookDetail,
+  CatalogFacets,
+  UserBookState,
+} from "@/types";
 
 /** The list item is the detail minus the two derived numbers. */
 export type BookListItem = BookSummary;
@@ -175,6 +181,15 @@ function buildQuery(query: ListBooksQuery) {
   if (query.category) filter.category = new Types.ObjectId(query.category);
   if (query.language) filter.language = query.language;
 
+  if (query.yearFrom !== undefined || query.yearTo !== undefined) {
+    // Only books that actually carry a year, so a book with no publication date
+    // cannot appear in a "1970–1980" search just because its field is null.
+    const bounds: Record<string, number> = {};
+    if (query.yearFrom !== undefined) bounds.$gte = query.yearFrom;
+    if (query.yearTo !== undefined) bounds.$lte = query.yearTo;
+    filter.publishedYear = bounds;
+  }
+
   if (query.q) {
     // Regex rather than `$text`: the staff table needs *partial* matches as the
     // user types ("dun" -> Dune), and `$text` only matches whole words. The
@@ -196,6 +211,58 @@ function buildQuery(query: ListBooksQuery) {
 }
 
 /**
+ * How many copies are promised to **ready** reservations, per book.
+ *
+ * Rule 6: a `ready` reservation consumes one copy from public availability, because
+ * it is being held for a named member until `reservationHoldHours` expires. Showing
+ * `availableCopies` in the catalog would therefore promise a book that cannot be
+ * collected, which is the single most trust-destroying thing a library catalog can
+ * do.
+ *
+ * Implemented for real rather than stubbed: the reservation collection already
+ * exists, the query is one round trip, and returning zeros would mean Unit 14 had
+ * to remember to come back and fix a number the catalog already displays.
+ *
+ * `waiting` reservations are deliberately **not** counted — they hold no copy yet.
+ */
+export async function getReadyHoldCounts(
+  bookIds: Types.ObjectId[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (bookIds.length === 0) return counts;
+
+  const rows = await Reservation.aggregate<{ _id: Types.ObjectId; holds: number }>([
+    { $match: { book: { $in: bookIds }, status: "ready" } },
+    { $group: { _id: "$book", holds: { $sum: 1 } } },
+  ]);
+
+  for (const row of rows) counts.set(row._id.toString(), row.holds);
+  return counts;
+}
+
+/**
+ * Attach `effectiveAvailable` to a page of books.
+ *
+ * Clamped at zero and never above `totalCopies`, because a hand-edited count should
+ * render "None available" rather than a negative or impossible number.
+ */
+async function withAvailability(
+  items: BookListItem[],
+): Promise<Array<BookListItem & { effectiveAvailable: number }>> {
+  const holds = await getReadyHoldCounts(
+    items.map((book) => new Types.ObjectId(book._id)),
+  );
+
+  return items.map((book) => ({
+    ...book,
+    effectiveAvailable: Math.min(
+      book.totalCopies,
+      Math.max(0, book.availableCopies - (holds.get(book._id) ?? 0)),
+    ),
+  }));
+}
+
+/**
  * List books, paginated.
  *
  * `status` defaults to `active` for the public catalog and `all` for the staff
@@ -208,6 +275,34 @@ export async function listBooks(query: ListBooksQuery): Promise<{
   const { filter, sort } = buildQuery(query);
   const page = Math.max(1, query.page);
   const limit = Math.min(100, Math.max(1, query.limit));
+
+  /*
+   * `availability: "available"` is filtered in memory rather than in the query.
+   *
+   * The predicate is `availableCopies - readyHolds > 0`, and `readyHolds` lives in
+   * a different collection — a `$lookup` inside `find()` cannot be followed by the
+   * `skip`/`limit` Mongo needs to paginate correctly. Filtering after pagination
+   * would make the result count a lie and let "Next" show an empty page, so the
+   * query is widened to the whole matching set, filtered, and *then* sliced. That
+   * is the honest cost of a cross-collection predicate on an unbounded filter; it
+   * is bounded by the `limit` the catalog actually requests.
+   */
+  if (query.availability === "available") {
+    const all = await Book.find(filter).sort(sort).lean();
+    const serialised = await serialiseAll(all);
+    const available = serialised.filter((book) => book.effectiveAvailable > 0);
+    const start = (page - 1) * limit;
+
+    return {
+      items: available.slice(start, start + limit),
+      meta: {
+        page,
+        limit,
+        total: available.length,
+        totalPages: limit > 0 ? Math.ceil(available.length / limit) : 0,
+      },
+    };
+  }
 
   const [total, docs] = await Promise.all([
     Book.countDocuments(filter),
@@ -230,6 +325,21 @@ export async function listBooks(query: ListBooksQuery): Promise<{
     items,
     meta: { page, limit, total, totalPages: limit > 0 ? Math.ceil(total / limit) : 0 },
   };
+}
+
+/** Serialise a whole result set in one go, with `effectiveAvailable` attached. */
+async function serialiseAll(
+  docs: Array<Record<string, unknown>>,
+): Promise<Array<BookListItem & { effectiveAvailable: number }>> {
+  const categories = await categoryMap([
+    ...new Set(docs.map((doc) => doc.category as Types.ObjectId)),
+  ]);
+
+  const items = docs.map((doc) =>
+    toApi(doc, categories.get(String(doc.category)) ?? null),
+  );
+
+  return withAvailability(items);
 }
 
 /** One book with the derived numbers the staff UI shows. */
@@ -255,6 +365,151 @@ export async function getBook(idOrSlug: string): Promise<BookDetail> {
     ...toApi(lean, categories.get(String(book.category)) ?? null),
     onLoan: Math.max(0, total - available),
     waitingReservations: waiting,
+  };
+}
+
+/**
+ * Public catalog detail (F5).
+ *
+ * Adds the three numbers a reader cannot derive from the stored copy counts:
+ * `effectiveAvailable` (a copy held for someone else is not available to you),
+ * `queueLength` (how many people are ahead of you), and `userState` (what *this*
+ * signed-in member has in flight).
+ *
+ * `userState` is computed from the session user id only — never from anything the
+ * client sent (invariant 3) — and `requireSession()` has already run in the route,
+ * so an anonymous caller simply gets the neutral `ANONYMOUS_STATE`.
+ */
+export async function getCatalogBook(
+  idOrSlug: string,
+  userId?: Types.ObjectId,
+): Promise<CatalogBookDetail> {
+  const book = await findBook(idOrSlug);
+  const lean = book.toObject() as unknown as Record<string, unknown>;
+
+  const [categories, reservations, wishlisted, activeLoan] = await Promise.all([
+    categoryMap([book.category as Types.ObjectId]),
+    Reservation.find({ book: book._id, status: { $in: ["waiting", "ready"] } })
+      .select("member status")
+      .lean<Array<{ member: Types.ObjectId; status: string }>>(),
+    userId
+      ? Wishlist.exists({ member: userId, book: book._id })
+      : Promise.resolve(false),
+    userId ? Loan.exists({ book: book._id, member: userId, status: "active" }) : Promise.resolve(false),
+  ]);
+
+  const mine = userId ? reservations.find((r) => String(r.member) === String(userId)) : undefined;
+  const summary = toApi(lean, categories.get(String(book.category)) ?? null);
+  const holds = await getReadyHoldCounts([book._id as Types.ObjectId]);
+
+  return {
+    ...summary,
+    effectiveAvailable: Math.min(
+      summary.totalCopies,
+      Math.max(0, summary.availableCopies - (holds.get(summary._id) ?? 0)),
+    ),
+    // Everyone in the queue, not "everyone except you". A reader needs to know how
+    // long the wait is, and the hold they are already in counts as position one.
+    queueLength: reservations.length,
+    userState: {
+      wishlisted: Boolean(wishlisted),
+      activeLoan: Boolean(activeLoan),
+      reservation: (mine?.status as UserBookState["reservation"]) ?? null,
+    },
+  };
+}
+
+/** What an anonymous caller gets. Frozen so it cannot be mutated by a consumer. */
+export const ANONYMOUS_USER_BOOK_STATE: UserBookState = Object.freeze({
+  wishlisted: false,
+  activeLoan: false,
+  reservation: null,
+});
+
+/**
+ * Other books in the same category (F5).
+ *
+ * Ranked rather than merely ordered by date, because "more in this category" is
+ * only useful if the suggestions are related: most-borrowed first, then
+ * highest-rated, then title for a stable tie-break. The book itself is excluded and
+ * the result is hard-capped by `max`.
+ */
+export async function listRelatedBooks(
+  idOrSlug: string,
+  max = 6,
+): Promise<Array<BookListItem & { effectiveAvailable: number }>> {
+  const book = await findBook(idOrSlug);
+
+  const docs = await Book.find({
+    status: "active",
+    category: book.category,
+    _id: { $ne: book._id },
+  })
+    .sort({ borrowCount: -1, ratingAvg: -1, title: 1, _id: 1 })
+    .limit(max)
+    .lean();
+
+  return serialiseAll(docs as unknown as Array<Record<string, unknown>>);
+}
+
+/**
+ * What the catalog filter panel can offer (F5).
+ *
+ * Counts are taken over **active** books and are deliberately *not* narrowed by the
+ * other active filters: a facet that renumbers itself as you type reads as
+ * disappearing options, and the count is a hint about the shelf, not a promise
+ * about the current result set.
+ *
+ * One aggregation for the counts and one pair of distinct queries for languages
+ * and the year bounds — three round trips total, and none of them scales with the
+ * number of books.
+ */
+export async function getCatalogFacets(): Promise<CatalogFacets> {
+  const [rows, languages, bounds] = await Promise.all([
+    Category.aggregate<{ _id: Types.ObjectId; name: string; slug: string; icon: string; color: string; count: number }>(
+      [
+        {
+          $lookup: {
+            from: Book.collection.name,
+            let: { categoryId: "$_id" },
+            pipeline: [
+              { $match: { $expr: { $eq: ["$category", "$$categoryId"] }, status: "active" } },
+              { $count: "count" },
+            ],
+            as: "books",
+          },
+        },
+        { $project: { name: 1, slug: 1, icon: 1, color: 1, count: { $ifNull: [{ $first: "$books.count" }, 0] } } },
+        { $sort: { name: 1 } },
+      ],
+    ),
+    Book.distinct("language", { status: "active" }),
+    Book.aggregate<{ min: number | null; max: number | null }>([
+      { $match: { status: "active", publishedYear: { $ne: null } } },
+      { $group: { _id: null, min: { $min: "$publishedYear" }, max: { $max: "$publishedYear" } } },
+    ]),
+  ]);
+
+  const currentYear = new Date().getFullYear();
+  const range = bounds[0];
+
+  return {
+    categories: rows.map((row) => ({
+      _id: row._id.toString(),
+      name: row.name,
+      slug: row.slug,
+      icon: String(row.icon ?? DEFAULT_CATEGORY_ICON),
+      color: isCategoryColor(row.color) ? row.color : DEFAULT_CATEGORY_COLOR,
+      count: row.count,
+    })),
+    // Sorted so the dropdown order is stable; `distinct` returns them unordered.
+    languages: languages.filter((l): l is string => typeof l === "string").sort((a, b) => a.localeCompare(b)),
+    yearRange: {
+      // A brand-new library has no dated books yet; fall back to a usable decade
+      // rather than rendering a slider pinned at 0.
+      from: range?.min ?? currentYear - 10,
+      to: range?.max ?? currentYear,
+    },
   };
 }
 

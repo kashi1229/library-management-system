@@ -3,13 +3,13 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell, profile and catalog management.**
-  Units 01–08 complete. Units 09 → 21 in progress per the developer's instruction to
+- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management and public catalog.**
+  Units 01–09 complete. Units 10 → 21 in progress per the developer's instruction to
   complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 09 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- Next unit: **09 — Public Catalog & Book Detail**.
+- Build Units 10 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- Next unit: **10 — Members & Team Management**.
 
 ## Completed
 
@@ -169,9 +169,62 @@ Update this file after every meaningful implementation change.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **09** Public Catalog → **10** Members & Team → **11/12** Circulation → **13** Fines →
+1. **10** Members & Team → **11/12** Circulation → **13** Fines →
    **14** Reservations → **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards →
    **18** Reports & Audit → **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
+
+### Unit 09 — Public Catalog & Book Detail ✅
+- `src/app/(public)/layout.tsx` — a public shell deliberately **not** `AppShell`: a visitor
+  has no sidebar, breadcrumbs or notifications, and rendering an authenticated nav for
+  someone who cannot use it is worse than none. The session is read from the **cookie
+  only** (no database round trip), purely to choose between "Sign in" and initials, so a
+  page any anonymous visitor can reach stays cheap. `PublicNav` (sticky, translucent,
+  border appears on scroll, in-flow mobile panel) and `PublicFooter` (three columns whose
+  links are real catalog shortcuts rather than a second nav bar).
+- **Service additions** — `getReadyHoldCounts`, `withAvailability`, `getCatalogBook`,
+  `listRelatedBooks`, `getCatalogFacets`.
+  - **`effectiveAvailable` is real, not a stub.** The spec suggested stubbing it, but the
+    reservation collection already exists and the query is one round trip, so returning
+    zeros would have left a number the catalog displays for Unit 14 to remember to fix.
+  - **`availability=available` is filtered after fetching, and that is documented as a
+    deliberate trade-off.** The predicate is `availableCopies − readyHolds > 0` across two
+    collections; a `$lookup` inside `find()` cannot be followed by the `skip`/`limit`
+    Mongo needs to paginate correctly. Filtering *after* `skip`/`limit` would make the
+    total a lie and let "Next" show an empty page, so the matching set is fetched, filtered
+    and then sliced.
+  - `listRelatedBooks` ranks by `borrowCount`, then rating, then title, with `_id` last —
+    "more in this category" is only useful if the suggestions are actually related.
+  - Facet counts are over **active** books and are deliberately **not** narrowed by the
+    other filters: a facet that renumbers itself as you type reads as options vanishing.
+- **API** — `GET /api/books` gained `availability`, `yearFrom`, `yearTo` (an inverted
+  range is a 422, not a silent empty result); new `GET /api/books/facets` and
+  `GET /api/books/:id/related`; `GET /api/books/:id` now returns the **catalog** shape
+  (`effectiveAvailable`, `queueLength`, `userState`) that the detail page needs, while the
+  staff edit form keeps reading `getBook()` server-side for raw counts. An archived book
+  404s on `/related` too, so it cannot advertise its neighbours.
+- **UI** — `CatalogBrowser` (SWR keyed on the filters, desktop sticky filter column and a
+  mobile bottom `Sheet` rendering the **same** `CatalogFilterPanel`), `BookCard` (whole card
+  is the link; availability overlaid on the cover), `BookListRow` (list mode shows year,
+  publisher, page count and a description snippet the grid has no room for),
+  `AvailabilityBadge` (one pip per copy, falling back to text above 12 so a 999-copy
+  textbook does not render 999 elements), `StarRating` (clipped overlay fill, so 4.3 shows a
+  precisely 30%-filled fifth star instead of rounding to 4), `ReadMore` (measures whether it
+  actually overflows rather than clamping to a guessed height), `CatalogToolbar` with an
+  `aria-live` result count, `useCatalogFilters`.
+- `useCatalogFilters` copies Unit 08's **focus-owns-the-value** rule for the debounced
+  search box rather than rediscovering it, and adds the per-kind history rule (discrete
+  filters `push`, search `replace`s). `view` (grid/list) is **deliberately not in the
+  URL** — it is a presentation preference, and every shared link would otherwise carry the
+  sender's screen choice; it persists to localStorage instead.
+- Verified against the local MongoDB: `/catalog`, `/catalog?sort=title`, a detail page and
+  all three new/changed API routes return 200; facets return correct per-category counts,
+  icons, languages and a 1969–1996 year range; `availability=available` drops 33 → 32 and
+  removes the one book with no free copy; a 1990–2000 year filter returns 1 book; an
+  inverted range is a 422. `tsc`, `eslint` and `next build` all clean.
+- **Deliberately not wired:** Reserve (Unit 14) and the wishlist (Unit 15). The buttons
+  render with the label they will have and a tooltip saying when they open, rather than
+  shipping controls that silently do nothing. Share *is* live (Web Share API with a
+  clipboard fallback), because a share link is genuinely useful for a catalog today.
 
 ### Unit 07 — Categories ✅
 - `lib/validators/category.ts` — `CATEGORY_ICON_NAMES` (**42-icon curated whitelist**), `createCategorySchema`,
@@ -268,6 +321,33 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
   server refresh clobbered it, leaving the API's avatar branch as dead code. Now calls `profileApi.update`.
 - **A revoked blob URL latched forever** — `preview` was set once and never cleared, so after the first
   upload the preview pointed at a dead object URL and masked the real image.
+
+### Unit 09 — bugs found by build and smoke check
+- **`container-page` had no working max-width on any page.** The `@utility` block read
+  `max-width: var(--container-7xl)` and `--container-7xl` was never declared, so the
+  declaration was invalid at computed-value time and every page fell back to `max-width:
+  none`. Invisible up to 1280px — the viewport is the constraint anyway — and wrong on
+  every larger screen, which is how it survived seven units of responsive QA. Now
+  declared as `80rem` in the `@theme inline` block.
+- **`.extend()` on a refined Zod schema is a runtime error.** Adding the inverted-year-range
+  check to `listBooksQuerySchema` made `staffBooksQuerySchema`'s `.extend()` throw
+  *"Cannot overwrite keys on object schemas containing refinements"*. `tsc` and `eslint`
+  were both clean; only `next build` failed, during page-data collection. `safeExtend` is
+  the correct call and the reason is now recorded on the schema.
+- **`useSearchParams()` is a build error in a prerendered route, not a warning.** The
+  catalog opted into the CSR bailout and killed the build. Declared
+  `export const dynamic = "force-dynamic"` rather than wrapped in a `<Suspense>` boundary:
+  a filterable catalog is per-request anyway, so a static shell buys nothing, and the
+  boundary would cost a visible spinner plus a subtree replacement that discards whatever
+  the user has already typed — exactly the Unit 08 login-page bug. The detail page reads
+  `params` rather than `searchParams` and stays statically renderable.
+- **`getSession()` returns only `{ sub, role, name }`.** The public navbar originally wanted
+  an avatar, which is not in the token; reading the user record on every public page load
+  would put a database round trip in front of every anonymous visitor, so the navbar shows
+  initials from `name` instead. Anything needing a live record goes through
+  `requireSession()`.
+- **The root page shipped a disabled catalog link** (`aria-disabled`, `tabIndex={-1}`, "opens
+  in Unit 09"). Correct as a placeholder, wrong to leave behind once the route existed.
 
 ### Unit 08 — Books (bugs found by browser QA)
 Every item here passed `tsc`, `eslint` and `next build`. None was reachable from an API test.
@@ -428,9 +508,11 @@ Reported by the developer after the first commit, then verified in the browser:
     is corrupted and a BOM is added. Use the editor tools instead.
 
 ## In Progress
-- Unit 09 — Public Catalog & Book Detail. Not started. `GET /api/books` and
-  `GET /api/books/:id` are already public, URL-synced and filter/sort/paginate, so this unit is
-  UI-only on the read side: the catalog grid, the filter panel, and the book detail page.
+- Unit 10 — Members & Team Management. Not started. Needs `GET/POST /api/members`,
+  `GET /api/members/:id`, `GET /api/members/lookup`, suspend/activate, reset-password, and
+  the admin-only `GET/POST /api/team`, `PATCH /api/team/:id`. Note that `POST /api/team`
+  is the first code path that creates a **staff** user, so it is the first exercise of the
+  `membershipId`-has-no-default rule fixed in Unit 08.
 
 ## Open Questions
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
@@ -526,9 +608,12 @@ Reported by the developer after the first commit, then verified in the browser:
 - `feat/02-database-models` — Units 02 **and 03** (Unit 03's commit landed here before the branch was
   switched; both units are complete and verified, so history was left intact rather than rewritten).
 - `feat/04-auth-ui` — Unit 04.
-- `feat/05-app-shell` — Units 05, 06, 07 and **08** (all on the same branch).
+- `feat/05-app-shell` — Units 05, 06, 07, **08** and **09** (all on the same branch).
   - Unit 08 also fixes two Unit 02/05 defects that only became reachable now: the `isbn` /
     `membershipId` sparse-index default, and the `proxy.ts` login redirect.
+  - Unit 09 adds `app/(public)/` (catalog + detail) alongside the app shell. The two
+    coexist: `(public)` renders no `AppShell`, so a visitor never sees staff or member
+    navigation.
 
 ## First Admin Account
 Unit 07 needed a librarian to verify with, and the register endpoint only ever creates a member by design,

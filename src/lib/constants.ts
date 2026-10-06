@@ -71,6 +71,15 @@ export type Language = (typeof LANGUAGES)[number];
 export const BOOK_AVAILABILITY = ["available", "all"] as const;
 export type BookAvailability = (typeof BOOK_AVAILABILITY)[number];
 
+/**
+ * Same set as `BOOK_AVAILABILITY`, named for the validator that consumes it.
+ *
+ * Two aliases of the same literals is how a query key and a type name end up
+ * disagreeing, so the validator imports this one and `BOOK_AVAILABILITY` is kept
+ * only as the public-facing name already referenced from `types`.
+ */
+export const BOOK_AVAILABILITIES = BOOK_AVAILABILITY;
+
 /* -------------------------------------------------------------------------- */
 /* Circulation                                                                  */
 /* -------------------------------------------------------------------------- */

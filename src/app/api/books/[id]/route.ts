@@ -1,6 +1,8 @@
-import { AppError, handler, ok, parseBody, parseParams } from "@/lib/api";
+import { handler, ok, parseBody, parseParams } from "@/lib/api";
+import { AppError } from "@/lib/api";
+import { Types } from "mongoose";
 import { getSession, requireStaff } from "@/lib/auth/session";
-import { deleteBook, getBook, updateBook } from "@/lib/services/books";
+import { deleteBook, getCatalogBook, updateBook } from "@/lib/services/books";
 import { bookParamSchema, updateBookSchema } from "@/lib/validators/book";
 
 /**
@@ -10,14 +12,26 @@ import { bookParamSchema, updateBookSchema } from "@/lib/validators/book";
  * hidden from the public: a member or anonymous caller asking for one gets the
  * same 404 as a book that does not exist, so the archive is not enumerable.
  * Staff still see archived books, because the staff table links here too.
+ *
+ * Returns the **catalog** shape — `effectiveAvailable`, `queueLength` and a
+ * `userState` derived from the session — because that is what the book detail page
+ * needs. The staff edit form reads through `getBook()` on the server instead, so it
+ * keeps the raw copy counts.
  */
 export const GET = handler(
   async (_request, { params }) => {
     const { id } = await parseParams(bookParamSchema, params);
-    const book = await getBook(id);
 
     const session = await getSession();
     const isStaff = session !== null && (session.role === "librarian" || session.role === "admin");
+
+    // `session.sub` is the user's id, and the service narrows it. A malformed id
+    // cannot come from a signed token, but it is checked rather than asserted so a
+    // bad token yields the neutral anonymous state instead of a 500.
+    const userId =
+      session && Types.ObjectId.isValid(session.sub) ? new Types.ObjectId(session.sub) : undefined;
+
+    const book = await getCatalogBook(id, userId);
 
     if (book.status === "archived" && !isStaff) {
       throw AppError.notFound("That book could not be found.");

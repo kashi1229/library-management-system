@@ -33,16 +33,17 @@ Roles: **P** public, **M** member+, **S** staff (librarian|admin), **A** admin.
 > painting an "undefined books" card until the next revalidation.
 
 ## Books
-| GET | /books | P | Query: `q, category, language, availability(available|all), yearFrom, yearTo, sort(newest|title|popular|rating), status(S only), page, limit` |
-| GET | /books/:slugOrId | P | Detail + `effectiveAvailable`, `queueLength`, rating summary; adds `userState` (wishlisted, activeLoan, reservation) if signed in |
-| GET | /books/:id/related | P | Same category, excluding self (max 6) |
+| GET | /books | P | Query: `q, category, language, availability(available\|all), yearFrom, yearTo, sort(newest\|title\|popular\|rating), status(S only), page, limit` |
+| GET | /books/:slugOrId | P | Detail + `effectiveAvailable`, `queueLength`, rating summary; `userState` (`wishlisted`, `activeLoan`, `reservation`) when signed in |
+| GET | /books/:id/related | P | Same category, excluding self (max 6), most-borrowed first |
+| GET | /books/facets | P | Category counts + icon/accent, languages present, publication year bounds |
 | POST | /books | S | Create (availableCopies = totalCopies) |
 | PATCH | /books/:id | S | Update (copy-count rule enforced) |
 | POST | /books/:id/archive | S | Archive / restore (`{ archived: boolean }`) |
 | DELETE | /books/:id | S | Hard delete if never loaned |
 | POST | /books/bulk-archive | S | `{ ids[] }` |
 
-Notes added in Unit 08:
+Notes added in Units 08–09:
 
 - **`status` defaults to `active`** (public) and `all` (staff). The route downgrades a
   non-staff caller to `active` **in the handler**, not the service, so the rule holds for
@@ -63,6 +64,20 @@ Notes added in Unit 08:
 - **`availableCopies` is not accepted on create.** The request schema does not contain
   the field, so a client cannot seed a book as "already on loan" (invariant 6).
 - `POST /books/:id/archive` also accepts a **slug**; `PATCH`/`DELETE` do not.
+- **`effectiveAvailable` = `availableCopies` − ready holds**, clamped to `[0, totalCopies]`.
+  A copy held for a named member is not available to anyone else, so showing
+  `availableCopies` would promise a book that cannot be collected (rule 6).
+- **`availability=available` is filtered after the query, not in it.** The predicate spans
+  two collections and a `$lookup` cannot be followed by the `skip`/`limit` Mongo needs to
+  paginate correctly. Filtering after `skip`/`limit` would make `meta.total` a lie and let
+  "Next" show an empty page, so the matching set is fetched, filtered, then sliced.
+- **`yearFrom > yearTo` is a 422**, so an inverted range names itself instead of quietly
+  matching nothing.
+- **`userState` is derived from the session user id only** — never from the request body
+  (invariant 3). An anonymous caller gets `{wishlisted:false, activeLoan:false,
+  reservation:null}`.
+- **Archived books 404** on `/books/:id` and `/books/:id/related` for non-staff, so the
+  archive is not enumerable through either route.
 
 ## Members & Team
 | GET | /members | S | Query `q, status, page, limit` (role=member) |

@@ -1,10 +1,19 @@
 import type { NextResponse } from "next/server";
 import type { ApiFailure, ApiSuccess } from "@/lib/api";
 import type { FieldErrors } from "@/lib/api";
-import type { BookSort, CategoryColor } from "@/lib/constants";
+import type { BookSort, BookAvailability, CategoryColor } from "@/lib/constants";
 import type { CategoryIconName } from "@/lib/validators/category";
-import type { BookStatusFilter } from "@/lib/validators/book";
-import type { BookDetail, BookSummary, CloudinaryImage, PageMeta, PublicUser } from "@/types";
+import type { BookStatusFilter, PublicBookSort } from "@/lib/validators/book";
+import type {
+  BookDetail,
+  BookSummary,
+  CatalogBook,
+  CatalogBookDetail,
+  CatalogFacets,
+  CloudinaryImage,
+  PageMeta,
+  PublicUser,
+} from "@/types";
 
 /**
  * Typed client for the API.
@@ -218,6 +227,8 @@ export type { BookDetail, BookSummary } from "@/types";
 /** The category object embedded in every book payload. */
 export type BookCategory = BookSummary["category"];
 
+export type { CatalogBook, CatalogBookDetail, CatalogFacets };
+
 /** Mirrors `createBookSchema`'s output; the form builds this shape directly. */
 export type BookInput = {
   title: string;
@@ -246,6 +257,23 @@ export type BookListFilters = {
   page?: number;
   limit?: number;
 };
+
+/** The catalog's filters, matching `listBooksQuerySchema` plus the reader sorts. */
+export type CatalogFilters = {
+  q?: string;
+  category?: string;
+  language?: string;
+  /** `available` keeps only books a reader could borrow today. */
+  availability?: BookAvailability;
+  yearFrom?: number;
+  yearTo?: number;
+  sort?: PublicBookSort;
+  page?: number;
+  limit?: number;
+};
+
+/** The filters the catalog sends. `status` is absent — the public catalog is active-only. */
+export type CatalogQuery = Omit<CatalogFilters, "status">;
 
 export const booksApi = {
   /** Returns the page of books **and** its `meta`, so pagination is exact. */
@@ -276,6 +304,22 @@ export const booksApi = {
       method: "POST",
       body: { ids },
     }),
+};
+
+/** Public catalog (F5). Separate from `booksApi` because the shapes differ. */
+export const catalogApi = {
+  list: (filters: CatalogFilters = {}, signal?: AbortSignal) =>
+    requestWithMeta<{ items: CatalogBook[] }>("/books", { query: filters, signal }),
+
+  /** Category counts, languages present and the publication year bounds. */
+  facets: (signal?: AbortSignal) =>
+    request<{ facets: CatalogFacets }>("/books/facets", { signal }).then((d) => d.facets),
+
+  get: (idOrSlug: string, signal?: AbortSignal) =>
+    request<{ book: CatalogBookDetail }>(`/books/${idOrSlug}`, { signal }).then((d) => d.book),
+
+  related: (idOrSlug: string, signal?: AbortSignal) =>
+    request<{ items: CatalogBook[] }>(`/books/${idOrSlug}/related`, { signal }).then((d) => d.items),
 };
 
 export const categoriesApi = {

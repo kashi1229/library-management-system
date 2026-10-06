@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Logo } from "@/components/common/logo";
-import { cn } from "@/lib/utils";
+import { ROUTES } from "@/lib/constants";
 
 export const metadata: Metadata = {
   title: "Athenaeum",
@@ -11,8 +11,13 @@ export const metadata: Metadata = {
 };
 
 /**
- * Unit 01 placeholder. The real marketing landing page is built in Unit 20
- * (`(marketing)/` route group), which will own `/` from that point on.
+ * Interim root. Unit 20 introduces `app/(marketing)/page.tsx`, which takes
+ * ownership of `/` and must delete this file in the same unit to avoid a route
+ * conflict.
+ *
+ * The catalog link became real in Unit 09; it used to render `aria-disabled` with a
+ * "coming soon" note, which is the right way to ship a placeholder and the wrong way
+ * to leave one in place once the route exists.
  */
 export default function RootPage() {
   return (
@@ -28,17 +33,12 @@ export default function RootPage() {
         </p>
       </div>
       <div className="flex flex-col items-center gap-3">
-        <Link
-          href="/catalog"
-          className={cn(buttonVariants({ size: "lg" }), "pointer-events-none opacity-60")}
-          aria-disabled="true"
-          tabIndex={-1}
-        >
+        <Link href={ROUTES.catalog} className={buttonVariants({ size: "lg" })}>
           Browse the catalog
-          <ArrowRight className="size-4" />
+          <ArrowRight className="size-4" aria-hidden="true" />
         </Link>
         <p className="text-caption text-muted-foreground">
-          The catalog opens in Unit 09. The design system is ready now.
+          Sign in to borrow, reserve and track what you have read.
         </p>
       </div>
     </main>
