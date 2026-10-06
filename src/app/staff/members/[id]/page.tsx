@@ -61,7 +61,7 @@ export default async function MemberDetailPage({ params }: Params) {
 
       <MemberHeader member={member} />
 
-      <MemberTabs />
+      <MemberTabs member={member} />
     </div>
   );
 }

@@ -1,15 +1,30 @@
 import "server-only";
 import { Types } from "mongoose";
 import { AppError } from "@/lib/api";
-import { Fine, Loan, Reservation, User } from "@/models";
+import { Book, Fine, Loan, Reservation, User } from "@/models";
 import { logAudit } from "@/lib/services/audit";
 import { notify } from "@/lib/services/notifications";
 import { generateTempPassword, hashPassword } from "@/lib/auth/password";
-import { ACTIVE_RESERVATION_STATUSES, type Role } from "@/lib/constants";
+import {
+  ACTIVE_RESERVATION_STATUSES,
+  DUE_SOON_DAYS,
+  MEMBER_HISTORY_LIMIT,
+  type FineStatus,
+  type LoanStatus,
+  type ReservationStatus,
+  type Role,
+} from "@/lib/constants";
 
 /** Where the notification sends the member when their account status changes. */
 const PROFILE_LINK = "/profile";
-import type { Actor, PublicUser } from "@/types";
+import type {
+  Actor,
+  CloudinaryImage,
+  LoanDisplayState,
+  MemberBookRef,
+  MemberRecord,
+  PublicUser,
+} from "@/types";
 
 /**
  * Member service — all business logic for F6.
@@ -28,16 +43,14 @@ export type MemberListItem = PublicUser & {
   activeLoans: number;
 };
 
-export type MemberDetail = PublicUser & {
-  activeLoans: number;
-  /** Every loan ever, returned or not. */
-  totalBorrowed: number;
-  unpaidFines: number;
-  /** `waiting` + `ready`. */
-  activeReservations: number;
-  /** Outstanding fine total in currency units, not a count. */
-  unpaidFineTotal: number;
-};
+/**
+ * The member record. An alias, not a second declaration.
+ *
+ * `MemberRecord` lives in `types/index.ts` because it is a **wire** shape that both this
+ * service and `lib/api-client` must agree on; declaring it in both places is how the
+ * Unit 08 book payload drifted into a type error with no visible cause.
+ */
+export type MemberDetail = MemberRecord;
 
 const MEMBER_FIELDS =
   "name email role membershipId phone department avatar status suspendedReason lastLoginAt createdAt";
@@ -115,6 +128,127 @@ async function activeLoanCounts(memberIds: Types.ObjectId[]): Promise<Map<string
 }
 
 /* -------------------------------------------------------------------------- */
+/* History helpers                                                             */
+/* -------------------------------------------------------------------------- */
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Derive a loan's display state and how many days late it is.
+ *
+ * `overdue` and `due_soon` are **derived and never stored** (invariant 4), so they are
+ * computed in exactly one place and handed to the client. Exported because the Unit
+ * 11/12 circulation desk renders the same states and must not grow a second copy of
+ * this rule.
+ *
+ * Days are **whole and rounded up**: a book due an hour ago is 1 day late, not 0. The
+ * fine is charged per day started, and a "0 days overdue" badge on an overdue loan
+ * would be worse than no badge.
+ */
+export function loanView(
+  loan: { status: LoanStatus; dueDate: Date },
+  now: Date,
+): { view: LoanDisplayState; daysOverdue: number } {
+  if (loan.status === "returned") return { view: "returned", daysOverdue: 0 };
+
+  const msLeft = loan.dueDate.getTime() - now.getTime();
+
+  if (msLeft < 0) return { view: "overdue", daysOverdue: Math.ceil(-msLeft / DAY_MS) };
+  if (msLeft <= DUE_SOON_DAYS * DAY_MS) return { view: "due_soon", daysOverdue: 0 };
+  return { view: "on_time", daysOverdue: 0 };
+}
+
+/**
+ * Book references for a set of ids, in one query.
+ *
+ * Every history row needs a title and a cover. This mirrors `categoryMap` in
+ * `services/books.ts`: one `$in`, one `Map` keyed by string, so callers never have to
+ * think about `ObjectId` equality.
+ */
+async function bookRefs(ids: unknown[]): Promise<Map<string, MemberBookRef>> {
+  const refs = new Map<string, MemberBookRef>();
+
+  const unique = [...new Set(ids.map(String))].filter((id) => Types.ObjectId.isValid(id));
+  if (unique.length === 0) return refs;
+
+  const docs = await Book.find({ _id: { $in: unique.map((id) => new Types.ObjectId(id)) } })
+    .select("title authors cover")
+    .lean<Array<Record<string, unknown>>>();
+
+  for (const doc of docs) {
+    refs.set(String(doc._id), {
+      id: String(doc._id),
+      title: String(doc.title),
+      authors: Array.isArray(doc.authors) ? (doc.authors as string[]) : [],
+      cover: (doc.cover as CloudinaryImage | null) ?? null,
+    });
+  }
+
+  return refs;
+}
+
+/**
+ * A row's book, or an honest placeholder if the book is gone.
+ *
+ * Deletion is refused while a book has loan history or an active hold, so this should
+ * not happen — but "should not happen" is exactly the assumption that produces a blank
+ * row and a support ticket. A named placeholder renders; `undefined` crashes the tab.
+ */
+function refFor(refs: Map<string, MemberBookRef>, id: unknown): MemberBookRef {
+  return (
+    refs.get(String(id)) ?? {
+      id: String(id),
+      title: "No longer in the catalog",
+      authors: [],
+      cover: null,
+    }
+  );
+}
+
+/**
+ * 1-based FIFO position for each of this member's waiting holds, in two queries total.
+ *
+ * The alternative is one count query per hold, which is N round trips for a list that
+ * is usually one or two rows long. Instead the whole queue for the handful of books
+ * involved is fetched once in FIFO order and the position is counted off it.
+ *
+ * Sorted `createdAt: 1, _id: 1` to match the `Reservation` FIFO index, with `_id` as
+ * the tiebreaker — without it, two holds created in the same millisecond have no
+ * defined order and the same hold could report a different position on each load.
+ */
+async function queuePositions(
+  bookIds: unknown[],
+  memberId: Types.ObjectId,
+): Promise<Map<string, number>> {
+  const positions = new Map<string, number>();
+
+  const unique = [...new Set(bookIds.map(String))].filter((id) => Types.ObjectId.isValid(id));
+  if (unique.length === 0) return positions;
+
+  const queue = await Reservation.find({
+    book: { $in: unique.map((id) => new Types.ObjectId(id)) },
+    status: { $in: [...ACTIVE_RESERVATION_STATUSES] },
+  })
+    .sort({ createdAt: 1, _id: 1 })
+    .select("book member")
+    .lean<Array<Record<string, unknown>>>();
+
+  const seen = new Map<string, number>();
+
+  for (const entry of queue) {
+    const bookKey = String(entry.book);
+    const place = (seen.get(bookKey) ?? 0) + 1;
+    seen.set(bookKey, place);
+
+    if (String(entry.member) === memberId.toString()) {
+      positions.set(String(entry._id), place);
+    }
+  }
+
+  return positions;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Read                                                                       */
 /* -------------------------------------------------------------------------- */
 
@@ -169,11 +303,16 @@ export async function listMembers(query: {
 }
 
 /**
- * One member with every number the detail header shows.
+ * One member: identity, the header's counts, and their recent loans, fines and holds.
  *
- * The four counts come from four short queries in parallel rather than one `$lookup`
- * pipeline, because each is a simple filtered count on an indexed field and a pipeline
- * would be far more code for no measurable gain at this size.
+ * Counts and rows are fetched together. The counts are exact over the whole collection;
+ * the rows are capped at `MEMBER_HISTORY_LIMIT` and newest-first, so the UI has to say
+ * "most recent N of M" rather than imply the list is everything. Returning both from one
+ * call also means the header and the tabs can never disagree — they read the same object.
+ *
+ * The loan `view` (`on_time` / `due_soon` / `overdue`) is derived here rather than in the
+ * component, and the queue positions are counted from one ordered read of the relevant
+ * queues. Both are shared rules; neither belongs in a render.
  *
  * Throws `NOT_FOUND` for a non-member too: an admin asking for a librarian's record
  * through the members screen is a client mistake, and saying so plainly beats
@@ -189,8 +328,20 @@ export async function getMemberDetail(id: string): Promise<MemberDetail> {
   if (!doc) throw AppError.notFound("That member could not be found.");
 
   const memberId = new Types.ObjectId(id);
+  const now = new Date();
 
-  const [activeLoans, totalBorrowed, unpaidFines, reservations, fineAgg] = await Promise.all([
+  // Counts and rows together in one `Promise.all`. They are independent reads on
+  // indexed fields, so they go out concurrently rather than in sequence.
+  const [
+    activeLoans,
+    totalBorrowed,
+    unpaidFines,
+    activeReservations,
+    fineAgg,
+    loanDocs,
+    fineDocs,
+    reservationDocs,
+  ] = await Promise.all([
     Loan.countDocuments({ member: memberId, status: "active" }),
     Loan.countDocuments({ member: memberId }),
     Fine.countDocuments({ member: memberId, status: "unpaid" }),
@@ -199,14 +350,86 @@ export async function getMemberDetail(id: string): Promise<MemberDetail> {
       { $match: { member: memberId, status: "unpaid" } },
       { $group: { _id: null, total: { $sum: "$amount" } } },
     ]),
+
+    // Newest first, because a librarian opens this screen to answer "what has this
+    // person got out right now". Every sort ends in `_id` so rows sharing a timestamp
+    // to the millisecond still have a defined order between requests.
+    Loan.find({ member: memberId })
+      .sort({ issuedAt: -1, _id: -1 })
+      .limit(MEMBER_HISTORY_LIMIT)
+      .lean(),
+    Fine.find({ member: memberId })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(MEMBER_HISTORY_LIMIT)
+      .lean(),
+    Reservation.find({ member: memberId })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(MEMBER_HISTORY_LIMIT)
+      .lean(),
+  ]);
+
+  const loans = loanDocs as unknown as Array<Record<string, unknown>>;
+  const fines = fineDocs as unknown as Array<Record<string, unknown>>;
+  const holds = reservationDocs as unknown as Array<Record<string, unknown>>;
+
+  const [refs, queue] = await Promise.all([
+    bookRefs([
+      ...loans.map((loan) => loan.book),
+      ...fines.map((fine) => fine.book),
+      ...holds.map((hold) => hold.book),
+    ]),
+    queuePositions(holds.map((hold) => hold.book), memberId),
   ]);
 
   return {
     ...toMember(doc, activeLoans),
     totalBorrowed,
     unpaidFines,
-    activeReservations: reservations,
+    activeReservations,
     unpaidFineTotal: Math.round(fineAgg[0]?.total ?? 0),
+
+    loans: loans.map((loan) => {
+      const dueDate = loan.dueDate as Date;
+      const { view, daysOverdue } = loanView(
+        { status: loan.status as LoanStatus, dueDate },
+        now,
+      );
+
+      return {
+        id: String(loan._id),
+        book: refFor(refs, loan.book),
+        status: loan.status as LoanStatus,
+        view,
+        issuedAt: (loan.issuedAt as Date).toISOString(),
+        dueDate: dueDate.toISOString(),
+        returnedAt: loan.returnedAt ? (loan.returnedAt as Date).toISOString() : null,
+        renewCount: Number(loan.renewCount ?? 0),
+        fineAmount: Number(loan.fineAmount ?? 0),
+        daysOverdue,
+      };
+    }),
+
+    fines: fines.map((fine) => ({
+      id: String(fine._id),
+      book: refFor(refs, fine.book),
+      amount: Number(fine.amount ?? 0),
+      status: fine.status as FineStatus,
+      daysOverdue: Number(fine.daysOverdue ?? 0),
+      ratePerDay: Number(fine.ratePerDay ?? 0),
+      raisedAt: (fine.createdAt as Date).toISOString(),
+      paidAt: fine.paidAt ? (fine.paidAt as Date).toISOString() : null,
+      reason: (fine.reason as string | null) ?? null,
+    })),
+
+    reservations: holds.map((hold) => ({
+      id: String(hold._id),
+      book: refFor(refs, hold.book),
+      status: hold.status as ReservationStatus,
+      queuePosition: queue.get(String(hold._id)) ?? null,
+      readyAt: hold.readyAt ? (hold.readyAt as Date).toISOString() : null,
+      expiresAt: hold.expiresAt ? (hold.expiresAt as Date).toISOString() : null,
+      requestedAt: (hold.createdAt as Date).toISOString(),
+    })),
   };
 }
 

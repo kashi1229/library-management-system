@@ -43,9 +43,28 @@ export function ResetPasswordDialog({
   const [revealed, setRevealed] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
 
+  /**
+   * Set synchronously the moment a reset succeeds, and read by the confirm step's
+   * close handler. A ref rather than `revealed` itself because the handler that reads
+   * it is **stale by construction**:
+   *
+   * `ConfirmDialog.handleConfirm` captured `onOpenChange` from the render in which the
+   * button was clicked, then awaits `onConfirm()` and calls `onOpenChange(false)`. By
+   * then `revealed` in *that closure* is still `null`, because React has not re-rendered
+   * — so reading `revealed` there would take the "the user cancelled" branch and wipe
+   * the password before the reveal dialog ever opened.
+   *
+   * That is exactly the bug this component shipped with: the reset succeeded, the toast
+   * fired, the password was set, and then the confirm dialog's own auto-close destroyed
+   * it. Nothing appeared and nothing errored. A ref written in the same tick is immune
+   * to the staleness.
+   */
+  const revealedRef = React.useRef(false);
+
   // Reset the transient state whenever the dialog is closed, so reopening it never
   // shows the previous member's password.
   const close = React.useCallback(() => {
+    revealedRef.current = false;
     setRevealed(null);
     setCopied(false);
     onOpenChange(false);
@@ -58,9 +77,14 @@ export function ResetPasswordDialog({
 
     try {
       const result = await membersApi.resetPassword(member.id);
+
+      // The ref goes first: it has to be true before `ConfirmDialog` fires its
+      // auto-close, which happens as soon as this function returns.
+      revealedRef.current = true;
       setRevealed(result.temporaryPassword);
+
       toast.success(`New password for ${result.user.name}`, {
-        description: "Shown once. Copy it now — it cannot be retrieved later.",
+        description: "Shown once. Copy it now, it cannot be retrieved later.",
       });
     } catch {
       // A toast, not inline state: `ConfirmDialog` closes itself as soon as
@@ -95,7 +119,14 @@ export function ResetPasswordDialog({
       <ConfirmDialog
         open={open && revealed === null}
         onOpenChange={(next) => {
-          if (!next && !pending) close();
+          // Two ways this fires, and they mean opposite things:
+          //
+          // - the user cancelled, so tear everything down; but
+          // - the reset just succeeded, and `ConfirmDialog` closes itself as soon as
+          //   `onConfirm` returns. That is not a dismissal and must not touch `revealed`.
+          if (next) return;
+          if (revealedRef.current) return;
+          if (!pending) close();
         }}
         title={`Reset ${member?.name ?? "this member"}'s password?`}
         consequence="A new password will be generated immediately. Their current password stops working and any device still signed in will have to sign in again."

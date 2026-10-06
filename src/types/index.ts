@@ -338,3 +338,103 @@ export type PublicUser = {
   lastLoginAt: string | null;
   createdAt: string;
 };
+
+/* -------------------------------------------------------------------------- */
+/* Member record (spec 10)                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** Enough of a book to render a row in a member's history. */
+export type MemberBookRef = {
+  id: string;
+  title: string;
+  authors: string[];
+  cover: CloudinaryImage | null;
+};
+
+/**
+ * The derived, displayable state of a loan.
+ *
+ * **Deliberately wider than `LoanView`.** `LoanView` is the *filter* vocabulary
+ * (`active | returned | overdue | due_soon`) that `api-contract.md` defines for the
+ * circulation desk. A loan out on time has no filter of its own — it is simply
+ * `active` — but it does have a display state, and `on_time` is what `STATUS_TONES`
+ * already maps to success. Reusing `LoanView` here would paint an "active" badge on a
+ * loan that is entirely in good standing.
+ */
+export type LoanDisplayState = "on_time" | "due_soon" | "overdue" | "returned";
+
+/**
+ * One loan on a member's record.
+ *
+ * `status` is the **stored** state and `view` is the **derived** one. `overdue` and
+ * `due_soon` never exist in the database (invariant 4: derived, never stored), so the
+ * service computes them once and hands them over. A client that recomputed them would
+ * have to re-derive the rule, and would then disagree with the circulation desk in
+ * Unit 11/12 — two answers to "is this late?" is exactly the bug worth designing out.
+ */
+export type MemberLoan = {
+  id: string;
+  book: MemberBookRef;
+  /** Stored: `active` or `returned`. */
+  status: LoanStatus;
+  /** Derived for display. */
+  view: LoanDisplayState;
+  issuedAt: string;
+  dueDate: string;
+  returnedAt: string | null;
+  renewCount: number;
+  /** Fine attached to this loan; denormalised onto the loan document. */
+  fineAmount: number;
+  /** Whole days past `dueDate`. `0` unless `view` is `overdue`. */
+  daysOverdue: number;
+};
+
+export type MemberFine = {
+  id: string;
+  book: MemberBookRef;
+  /** Currency units. */
+  amount: number;
+  status: FineStatus;
+  daysOverdue: number;
+  /** What the daily rate was when the fine was raised, so it can be shown as history. */
+  ratePerDay: number;
+  raisedAt: string;
+  paidAt: string | null;
+  reason: string | null;
+};
+
+export type MemberReservation = {
+  id: string;
+  book: MemberBookRef;
+  status: ReservationStatus;
+  /** 1-based place in the FIFO queue. `null` once `ready` or once the hold closed. */
+  queuePosition: number | null;
+  readyAt: string | null;
+  expiresAt: string | null;
+  requestedAt: string;
+};
+
+/**
+ * `GET /api/members/:id` — the whole record.
+ *
+ * Counts and rows are both here on purpose. A librarian looking at a member wants the
+ * lifetime total *and* the recent activity; making the client add one up from a
+ * truncated list would produce a number that silently disagrees with the header above it.
+ *
+ * Each list is capped at `MEMBER_HISTORY_LIMIT`, newest first, and the counts are the
+ * real totals — so the UI can say "showing the 50 most recent of 340" rather than
+ * implying the list is complete.
+ */
+export type MemberRecord = PublicUser & {
+  activeLoans: number;
+  /** Every loan ever, returned or not. */
+  totalBorrowed: number;
+  unpaidFines: number;
+  /** `waiting` + `ready`. */
+  activeReservations: number;
+  /** Outstanding fine total in currency units, not a count. */
+  unpaidFineTotal: number;
+  loans: MemberLoan[];
+  fines: MemberFine[];
+  reservations: MemberReservation[];
+};

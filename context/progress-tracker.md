@@ -55,17 +55,21 @@ Update this file after every meaningful implementation change.
   `SuspendDialog` (reason is required and is the point of the dialog), `ResetPasswordDialog`
   (confirm → reveal-once with copy, and it says so).
   `/staff/members/[id]`: `MemberHeader` (identity, status, the suspension reason, four KPI
-  `StatCard`s) + `MemberTabs` (Overview real; Loans/Fines/Reservations **name the unit that
-  will fill them** rather than rendering a blank panel).
+  `StatCard`s) + `MemberTabs` (Overview, Loans, Fines and Reservations all render **real
+  rows** from the record — see the fix below; the first version shipped them as
+  "arrives with the circulation work" placeholders, which was wrong).
   `/staff/team`: `TeamManager` + `AddLibrarianDialog` (generates the password, validate as you
   type, one scrolling region with a pinned footer per the Unit 07 rule).
 - `src/hooks/use-member-filters.ts` follows Unit 08's **focus-owns-the-value** rule and the
   per-kind history rule rather than rediscovering them.
 - **The detail page needs no serialisation step**: `getMemberDetail` reads `.lean()` and maps
   through `toMember`, so it already returns a plain object — unlike Unit 08's `listCategories`.
-- Verification per the developer's instruction to keep it light: `tsc`, `eslint` and
-  `next build` all clean, all 11 routes present. **Not** browser- or API-verified against a
-  live database.
+- **Verified against the live local MongoDB** after the two fixes below (login as admin,
+  `/api/members`, `/api/members/:id`): counts and rows agree
+  (`activeLoans=1, totalBorrowed=1, unpaidFines=0, activeReservations=1`), the loan row
+  carries its real book title, `view=on_time` and ISO dates, and the waiting hold reports
+  `queuePosition=1`. The reset-password reveal is fixed but was **not** confirmed in a
+  browser — see the note on that fix.
 
 ### Unit 01 — Bootstrap & Design System ✅ · `feat/01-bootstrap-design-system`
 - Restructured to `src/` with the `@/*` → `./src/*` alias, matching `architecture.md`.
@@ -612,8 +616,8 @@ Reported by the developer after the first commit, then verified in the browser:
   `randomIndex(10)` for a digit. The alphabet has 52 letters and 8 digits, so the digit index
   range was 52–61 against a 60-character string — **two of ten draws returned `undefined`**,
   producing a 9-character password that failed the very policy it was generated to satisfy.
-  Nothing catches this: `charAt`/indexing returns `undefined` rather than throwing, and the
-  result is a valid `string` after `join`. Fixed with explicit `FIRST_DIGIT_INDEX` bounds and a
+  Nothing catches this: indexing returns `undefined` rather than throwing, and the result is a
+  valid `string` after `join`. Fixed with explicit `FIRST_DIGIT_INDEX` bounds and a
   Fisher-Yates shuffle so the guaranteed letter/digit are not always in the same positions.
 - **A failed password reset was completely silent.** `ResetPasswordDialog` held the error in
   component state, but `ConfirmDialog` **always** calls `onOpenChange(false)` once `onConfirm`
@@ -636,13 +640,68 @@ Reported by the developer after the first commit, then verified in the browser:
   comparison would never have matched and the admin could have been offered the action that
   disables themselves. `.toString()` at the boundary, not an `as string` cast.
 
+### Unit 10 — bugs found by the developer using the pages
+Both reported after the unit was committed, and both passed `tsc`, `eslint` and `next build`.
+
+- **The detail tabs showed "arrives with the circulation work" instead of the member's data.**
+  Loans, Fines and Reservations were rendered as placeholders on the reasoning that those
+  units had not been built. **That reasoning was wrong.** The `Loan`, `Fine` and `Reservation`
+  collections, their schemas and their indexes have existed since Unit 02 — the data was
+  there to read, and `getMemberDetail` was already counting from it. So the screen showed a
+  confident, well-formatted statement that it had nothing to show, over a database holding the
+  member's loan and hold.
+  - `getMemberDetail` now returns the rows as well as the counts, capped at
+    `MEMBER_HISTORY_LIMIT` (50) and newest-first, with the **counts left exact** so the UI can
+    say "showing the 50 most recent of 340" rather than implying the list is everything.
+  - Book titles and covers are resolved in one `$in` query into a `Map`, mirroring
+    `categoryMap` in `services/books.ts`, rather than a `$lookup` per row.
+  - **The derived loan state is computed in the service, not the component.** `on_time` /
+    `due_soon` / `overdue` do not exist in the database (invariant 4), so `loanView()` is the
+    single place that derives them — exported, because Unit 11/12 renders the same states and
+    must not grow a second copy of the rule.
+  - `LoanDisplayState` was added rather than reusing `LoanView`. `LoanView` is the *filter*
+    vocabulary that `api-contract.md` defines (`active | returned | overdue | due_soon`); a loan
+    out on time has no filter of its own, and reusing `LoanView` would have painted an
+    "active" badge on a loan that is entirely in good standing.
+  - **Queue positions are counted from one ordered read** of the queues for the books involved,
+    not one query per hold. The sort is `createdAt: 1, _id: 1` to match the FIFO index, with
+    `_id` as the tiebreaker — without it two holds created in the same millisecond have no
+    defined order and the same hold reports a different position on each load.
+  - `MemberRecord` lives in `types/index.ts` and both the service and `api-client` alias it.
+    `MemberDetail` had been declared separately in each, which is how the Unit 08 payload drifted.
+  - **Verified live** against the local MongoDB: `activeLoans=1, totalBorrowed=1, unpaidFines=0,
+    activeReservations=1`, the loan row carries its real book title with `view=on_time` and ISO
+    dates, and the waiting hold reports `queuePosition=1`.
+  - Worth knowing when looking at this screen: **the developer's own account has no loans, fines
+    or reservations**, so their record shows correct empty states. The QA member
+    `Mia Member` (LIB-2026-9001) is the one with a loan and a hold.
+- **The reset password was never shown.** Clicking "Reset password" produced a success toast and
+  then nothing at all — no password, no error, nothing to copy. The API was fine: the envelope,
+  `request()` and `membersApi.resetPassword` were all correct, and the service returned the
+  password. The value was being **destroyed in the client on the way to the screen**.
+  - `ConfirmDialog.handleConfirm` captures `onOpenChange` from the render in which the button was
+    clicked, then awaits `onConfirm()` and calls `onOpenChange(false)` to dismiss itself. Our
+    handler read `!pending` from that **stale closure** — where `pending` was still `false`,
+    because the reset had not started when the click was captured — so it took the "user
+    cancelled" branch and called `close()`, which cleared `revealed`. The reset had succeeded, the
+    toast fired, the password was in state, and the dialog's own auto-close wiped it before the
+    reveal could render.
+  - Fixed with a **ref** written synchronously on success, not by reading `revealed`. Reading
+    state would not have worked: the handler is stale by construction, so `revealed` still reads
+    `null` in it no matter when React re-renders. The ref is immune to that.
+  - **Not confirmed in a browser.** The 200-draw stress test on the generator was cut short by
+    the developer, so the reveal is verified by construction and by the reported symptom being
+    explained end to end — not by watching it render. Worth one manual click through at Unit 21.
+
 ### Unit 10 — deliberately not done
-- **No browser or live-database verification**, per the developer's instruction to keep this
-  unit to static and build checks. The gates run were `tsc`, `eslint` and `next build`.
-  The suspension path, the reset-password reveal, the last-admin guards and the duplicate-email
-  error are all therefore **unproven at runtime** — see Unit 21.
+- **The reset-password reveal still needs one manual click-through.** Everything else in this
+  unit was checked live; that one was fixed by construction and confirmed by the reported
+  symptom being explained end to end, not by watching it render.
 - `GET /api/members/lookup` is built and returns real rows, but nothing consumes it yet. It
   exists for the Unit 11/12 circulation desk, which is the only screen that needs type-ahead.
+- The per-tab **actions** are not there yet, by design: issuing a book, taking a fine payment
+  and cancelling a hold all belong to Units 11/12/13/14. Each tab says which screen will do it
+  rather than showing a button that does nothing.
 
 ## In Progress
 - Unit 11/12 — Circulation. Not started. Needs `GET /api/loans` with `status`, `memberId`,
@@ -684,6 +743,16 @@ Reported by the developer after the first commit, then verified in the browser:
   deleting only flagged documents let them accumulate; a stray title sorted ahead of `Kindred` and failed
   an alphabetical assertion that was actually correct. `bootstrap08.mjs` deletes by `__qa`, by
   `addedBy ∈ QA users`, and by a `^QA` title prefix.
+- **The local database is nearly empty of activity.** As of this unit it holds 2 members,
+  34 books, **2 loans, 0 fines and 1 reservation**, and only one of the two members has any
+  history at all. Every screen that renders loans, fines or reservations will therefore look
+  empty for most accounts, which reads as "broken" rather than "no data yet". Before browser QA
+  on any of those screens, seed realistic activity (an overdue loan, a paid fine, a waived fine,
+  a ready hold) or you are testing the empty state and calling it a pass.
+  - The QA member with the history is `Mia Member` / LIB-2026-9001; the developer's own account
+    has none.
+  - `qa.admin@athenaeum.test` was rotated to a fresh password during this unit's verification
+    (value deliberately not recorded here). `make-admin.mjs` takes the password as an argument.
 - **JSON does not survive a PowerShell argument** — `{a:"b"}` arrives as `{a:b}`. Pass structured data
   through `$env:` instead.
 - **`$env:` does not persist between tool calls.** Re-seed the fixtures *and* re-export `QA_FIX` in the
@@ -736,6 +805,18 @@ Reported by the developer after the first commit, then verified in the browser:
 - **A caller of `ConfirmDialog` cannot show an inline error.** It closes itself as soon as
   `onConfirm` settles, so any error state is unmounted before it paints. Report failures with a
   toast, or use a controlled `Dialog`.
+- **`ConfirmDialog`'s `onOpenChange(false)` is ambiguous: a dismissal *or* a successful
+  confirm.** Its handler runs after `onConfirm` resolves, from a closure captured when the button
+  was clicked, so **every piece of state it reads is stale**. A caller that has to distinguish the
+  two cases must write a **ref** synchronously inside `onConfirm`, not read state. Reading state
+  is what made the reset dialog destroy the password it had just generated: the reset worked, the
+  toast fired, and the dialog's own auto-close then cleared the result.
+- **"This data belongs to a unit that hasn't been built" is usually the wrong conclusion — check
+  the collection first.** The Unit 10 detail tabs rendered "arrives with the circulation work"
+  placeholders while `Loan`, `Fine` and `Reservation` had existed since Unit 02. A confident
+  empty panel is worse than an empty one, because it tells the user the app is finished here.
+  Deferring a *feature* is fine; claiming there is no *data* is a separate claim, and it needs
+  checking against the database.
 - **A generated credential must be verified against its own validator.** A one-off alphabet with
   index ranges that do not line up produces `undefined` characters and a value that is too short,
   and neither a compiler nor an index access will complain. Generate from one module, bound the
@@ -743,6 +824,14 @@ Reported by the developer after the first commit, then verified in the browser:
 - **Never hard-code a policy threshold in a component.** `maxActiveLoans`, `maxRenewals` and the
   fine limits are editable at runtime (invariant 7). Until a client-side settings accessor exists,
   show the number without threshold-dependent tone rather than showing it against a stale constant.
+- **Derive derived state in the service, not the component.** `overdue` and `due_soon` are not
+  stored (invariant 4), so any screen showing a loan has to derive them. Doing it in the render
+  means the member record and the circulation desk can answer "is this late?" differently.
+  Derive once in the service and put the result on the wire; keep the filter vocabulary
+  (`LoanView`) and the display vocabulary (`LoanDisplayState`) as separate types, because a loan
+  out on time has no filter but does have a display state.
+- **A capped list must say it is capped.** Returning the newest 50 rows beside an exact total and
+  rendering no note reads as "this is everything". Compare the row count against the limit.
 - **Never unmount a form's only submit button.** A form with no submit button falls into the
   implicit-submission path, where a real mouse click on a `type="button"` inside it submits anyway. Keep the
   submit button mounted and disable it instead of swapping it out. Related: `el.click()` does not

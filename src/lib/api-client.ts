@@ -11,6 +11,7 @@ import type {
   CatalogBookDetail,
   CatalogFacets,
   CloudinaryImage,
+  MemberRecord,
   PageMeta,
   PublicUser,
 } from "@/types";
@@ -332,16 +333,22 @@ export type MemberSummary = PublicUser & {
   activeLoans: number;
 };
 
-/** Member detail: `MemberSummary` plus the four numbers the KPI row shows. */
-export type MemberDetail = MemberSummary & {
-  /** Every loan ever, returned or not. */
-  totalBorrowed: number;
-  unpaidFines: number;
-  /** `waiting` + `ready`. */
-  activeReservations: number;
-  /** Outstanding fine total in currency units, not a count. */
-  unpaidFineTotal: number;
-};
+/**
+ * The full member record: counts **and** the loan, fine and reservation rows.
+ *
+ * An alias for the one declaration in `types/index.ts`. Declaring it here as well is how
+ * the Unit 08 book payload drifted into a type error with no visible cause — the service
+ * and the client each had their own copy and they disagreed on a nullability.
+ */
+export type MemberDetail = MemberRecord;
+
+/**
+ * The per-row shapes, re-exported so a component imports its props from one place.
+ *
+ * Same reasoning as the books block above: these are wire shapes, so `types/index.ts`
+ * owns them and this module only hands them on.
+ */
+export type { MemberBookRef, MemberFine, MemberLoan, MemberRecord, MemberReservation } from "@/types";
 
 /** A librarian or admin. `PublicUser` already carries the role and status. */
 export type TeamMember = PublicUser;

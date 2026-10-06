@@ -91,6 +91,24 @@ export type LoanStatus = (typeof LOAN_STATUSES)[number];
 export const LOAN_VIEWS = ["active", "returned", "overdue", "due_soon"] as const;
 export type LoanView = (typeof LOAN_VIEWS)[number];
 
+/**
+ * How close to the due date a loan counts as `due_soon`.
+ *
+ * Lives here rather than in a component because the derivation is shared: the member
+ * record and the Unit 11/12 circulation desk must agree on when a loan turns amber, or
+ * the same loan reads "due soon" on one screen and "on time" on another.
+ */
+export const DUE_SOON_DAYS = 3;
+
+/**
+ * Rows of history per collection on a member's record.
+ *
+ * A cap, not a pagination scheme: this is a screen a librarian glances at, not an
+ * archive. The counts beside it are the real totals, so the UI says "showing the most
+ * recent 50 of 340" instead of implying the list is everything.
+ */
+export const MEMBER_HISTORY_LIMIT = 50;
+
 export const RESERVATION_STATUSES = [
   "waiting",
   "ready",
