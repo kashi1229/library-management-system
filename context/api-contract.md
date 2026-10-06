@@ -42,6 +42,28 @@ Roles: **P** public, **M** member+, **S** staff (librarian|admin), **A** admin.
 | DELETE | /books/:id | S | Hard delete if never loaned |
 | POST | /books/bulk-archive | S | `{ ids[] }` |
 
+Notes added in Unit 08:
+
+- **`status` defaults to `active`** (public) and `all` (staff). The route downgrades a
+  non-staff caller to `active` **in the handler**, not the service, so the rule holds for
+  every caller: anonymous and member requests never see an archived book, and an archived
+  book requested directly is a **404**, not a 403, so the archive is not enumerable.
+- **`limit` above the documented maximum of 100 is a 422**, not silently clamped —
+  `Too big: expected number to be <=100`. `page` likewise rejects `0`.
+- **`PATCH`/`DELETE` require an ObjectId, not a slug.** A slug there is a client mistake
+  and is reported as such (`Use the book id to update a book.`) rather than being
+  silently resolved; `GET` accepts either, since the catalog links by slug.
+- **An empty `PATCH` body is a 422**, so a no-op can never write an audit entry claiming
+  a change. "Was a field supplied?" is tested against the raw request, so `isbn: ""`
+  (clear it) and `tags: []` are still meaningful sends.
+- **`POST /books/bulk-archive` is idempotent**: already-archived books come back under
+  `skipped`, not as a failure, so re-running a selection is safe.
+- **Copy arithmetic:** `availableCopies` moves by the *delta* of `totalCopies`. Lowering
+  the total below what is out on loan is `RULE_VIOLATION` (400) naming the number.
+- **`availableCopies` is not accepted on create.** The request schema does not contain
+  the field, so a client cannot seed a book as "already on loan" (invariant 6).
+- `POST /books/:id/archive` also accepts a **slug**; `PATCH`/`DELETE` do not.
+
 ## Members & Team
 | GET | /members | S | Query `q, status, page, limit` (role=member) |
 | GET | /members/:id | S | Detail + summaries |

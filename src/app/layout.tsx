@@ -27,6 +27,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       suppressHydrationWarning
+      // `globals.css` sets `scroll-behavior: smooth` on `<html>`. Next.js reads
+      // this attribute to know the smooth scrolling is intentional, and without
+      // it every client-side route transition logs a console warning and animates
+      // the scroll. Documented at nextjs.org/docs/messages/missing-data-scroll-behavior.
+      data-scroll-behavior="smooth"
       className={`${fontVariables} h-full`}
     >
       <body className="flex min-h-full flex-col font-sans antialiased">

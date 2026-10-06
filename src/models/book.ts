@@ -12,12 +12,16 @@ const CoverSchema = new Schema(
 
 const BookSchema = new Schema<BookDoc>(
   {
+    // Length caps match `createBookSchema` exactly (spec 08). They used to differ
+    // (300 here, 200 there), which means the validator rejected input the schema
+    // would have accepted and the error surfaced as a generic 500 rather than a
+    // field message.
     title: {
       type: String,
       required: [true, "Title is required"],
       trim: true,
-      minlength: [1, "Title is required"],
-      maxlength: [300, "Title must be 300 characters or fewer"],
+      minlength: [2, "Title must be at least 2 characters"],
+      maxlength: [200, "Title must be 200 characters or fewer"],
       index: true,
     },
     /** From title + short id suffix, so two books with the same title differ. */
@@ -31,8 +35,19 @@ const BookSchema = new Schema<BookDoc>(
       },
       index: true,
     },
-    /** Stored normalised: digits and X only, no hyphens. */
-    isbn: { type: String, default: null, unique: true, sparse: true, trim: true, uppercase: true },
+    /**
+     * Stored normalised: digits and X only, no hyphens.
+     *
+     * **No `default: null`.** A `sparse` unique index skips documents where the
+     * field is *absent*, but a stored `null` is a value, so a default would make
+     * every ISBN-less book collide on `isbn_1` and the second one would fail with
+     * a bare `E11000` — "that record already exists" for a book that does not
+     * exist yet. Same trap as `User.membershipId` (see `data-model.md`).
+     *
+     * Writers must therefore **omit** the key rather than set it to `null`;
+     * `createBook` and `updateBook` both do.
+     */
+    isbn: { type: String, unique: true, sparse: true, trim: true, uppercase: true },
     publisher: { type: String, default: null, trim: true, maxlength: 200 },
     edition: { type: String, default: null, trim: true, maxlength: 80 },
     publishedYear: {
@@ -55,9 +70,14 @@ const BookSchema = new Schema<BookDoc>(
       index: true,
     },
     description: { type: String, default: null, trim: true, maxlength: 2000 },
-    pageCount: { type: Number, default: null, min: [1, "Page count must be positive"] },
+    pageCount: {
+      type: Number,
+      default: null,
+      min: [1, "Page count must be positive"],
+      max: [10000, "Page count must be 10000 or fewer"],
+    },
     cover: { type: CoverSchema, default: null },
-    shelfLocation: { type: String, default: null, trim: true, maxlength: 40 },
+    shelfLocation: { type: String, default: null, trim: true, maxlength: 20 },
     totalCopies: {
       type: Number,
       required: true,

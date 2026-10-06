@@ -110,7 +110,26 @@ Scale: Hero `clamp(2.5rem, 6vw, 4.5rem)`; H1 `2.25rem`; H2 `1.75rem`; H3 `1.25re
 - **Auth pages:** two panels ≥1024px (left: form; right: parchment panel with large serif quote and softly drifting book spines illustration built from CSS shapes). Mobile: form only with small logo.
 - **Catalog:** left filter column (sticky) on desktop; filters in a bottom Sheet on mobile. Grid: 2 cols (mobile) → 3 → 4 → 5.
 - **Book detail:** two-column (cover sticky left, info right) ≥768px; stacked on mobile; action bar becomes sticky bottom bar on mobile.
-- **Forms:** single column on mobile, two columns on `md+`; sticky action footer for long forms.
+- **Forms:** single column on mobile, two columns on `md+`; **long forms get a `fixed` action footer** with
+  matching bottom padding on the form (`pb-32`), the page-level equivalent of the pinned dialog footer. The
+  book form is the reference: ~1400px tall, so without it Save is only reachable by scrolling to the very
+  end.
+- **Staff DataTable:** sticky header, no zebra, row hover `muted`, sortable headers, pagination footer.
+  Under `md` the same rows render as stacked cards — from **one component**, not two, so the layouts cannot
+  drift. The card list carries its **own select-all**, because a bulk action with no visible select-all is a
+  bulk action nobody can start.
+- **Availability cell:** "N of M available" plus a thin bar with a real `role="progressbar"`, tone per
+  StatusBadge. The label **wraps rather than being `nowrap`** — in a tight column a nowrap label overflows
+  its cell, which is visible clipping rather than a graceful wrap.
+- **Row menu:** always mounted, never disabled, so keyboard users keep a stable tab stop. The destructive
+  item is separated and tinted `danger` with a text label, never colour alone.
+- **Filter bar:** search + category + sort stay in one row; status tabs, the active-filter count and Reset
+  sit on a second. Discrete filter changes push history (Back undoes them); a debounced search box replaces
+  it. Show the count of active filters — a filtered table that does not say so reads as an empty one.
+- **Unsaved-changes prompt:** a `ConfirmDialog` driven by the *blocked destination*, not by a boolean, so
+  confirming navigates where the user actually wanted to go. Closing it always means "keep editing".
+- **Small-screen breadcrumbs:** show only the current page below `sm`. At 360px the Topbar has no room for
+  intermediate labels, and a truncated one becomes a ~21px pointer target — under WCAG 2.2 SC 2.5.8.
 
 ## Navigation Items (Lucide icons)
 **Member:** Dashboard `LayoutDashboard`, Catalog `Library`, My Loans `BookMarked`, Reservations `Clock`, Wishlist `Heart`, Fines `Receipt`, Notifications `Bell`, Profile `UserRound`.

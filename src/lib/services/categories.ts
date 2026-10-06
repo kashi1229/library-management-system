@@ -4,9 +4,16 @@ import { AppError } from "@/lib/api";
 import { Book, Category } from "@/models";
 import { logAudit } from "@/lib/services/audit";
 import { slugify } from "@/lib/validators/category";
-import type { CreateCategoryInput, UpdateCategoryInput } from "@/lib/validators/category";
+import type { CategoryIconName, CreateCategoryInput, UpdateCategoryInput } from "@/lib/validators/category";
+import { CATEGORY_ICON_NAMES } from "@/lib/validators/category";
 import type { Actor } from "@/types";
 import type { CategoryDoc } from "@/types";
+import {
+  CATEGORY_COLORS,
+  DEFAULT_CATEGORY_COLOR,
+  DEFAULT_CATEGORY_ICON,
+  type CategoryColor,
+} from "@/lib/constants";
 
 /**
  * Category service — all business logic for F3.
@@ -17,6 +24,56 @@ import type { CategoryDoc } from "@/types";
  */
 
 export type CategoryWithCount = CategoryDoc & { bookCount: number };
+
+/**
+ * The client-facing shape: ids and dates already serialised to strings.
+ *
+ * `code-standards.md` requires serialisation at the boundary. Relying on
+ * `JSON.stringify` coercing an ObjectId to a string makes the wire format agree
+ * with the declared type by accident, and leaves Server Components (Unit 08's book
+ * form) unable to hand a category to a client component at all. One explicit
+ * serialiser, used by both the route and the page, makes it correct by design.
+ */
+export type CategorySummary = {
+  _id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  icon: string;
+  color: CategoryColor;
+  bookCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export function toCategorySummary(category: CategoryWithCount): CategorySummary {
+  return {
+    _id: category._id.toString(),
+    name: category.name,
+    slug: category.slug,
+    description: category.description ?? null,
+    // Both are narrowed rather than cast. `icon` is validated against
+    // `CATEGORY_ICON_NAMES` on write, but a document predating the whitelist (or
+    // an edited one by hand) could hold a name that no longer resolves, and
+    // passing it straight through would break the client's compile-time promise
+    // that a stored icon always maps to a component.
+    icon: isCategoryIconName(category.icon) ? category.icon : DEFAULT_CATEGORY_ICON,
+    color: isCategoryColor(category.color) ? category.color : DEFAULT_CATEGORY_COLOR,
+    bookCount: category.bookCount,
+    createdAt: category.createdAt.toISOString(),
+    updatedAt: category.updatedAt.toISOString(),
+  };
+}
+
+/** Narrow to one of the six `CATEGORY_COLORS` keys. */
+function isCategoryColor(value: unknown): value is CategoryColor {
+  return typeof value === "string" && (CATEGORY_COLORS as readonly string[]).includes(value);
+}
+
+/** Narrow to one of the 42 whitelisted icon names. */
+function isCategoryIconName(value: unknown): value is CategoryIconName {
+  return typeof value === "string" && (CATEGORY_ICON_NAMES as readonly string[]).includes(value);
+}
 
 /**
  * Categories with a count of **active** books only.

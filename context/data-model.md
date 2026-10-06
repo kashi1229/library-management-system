@@ -18,6 +18,12 @@ Refs are ObjectIds. "(idx)" = index. Define every enum in `lib/constants.ts` and
 | suspendedReason | string optional | |
 | lastLoginAt | Date optional | |
 
+> **`membershipId` has no `default`.** A sparse unique index skips documents where the
+> field is *absent*; a stored `null` is a value. With a default, every staff account
+> would collide on `membershipId_1` and the second librarian ever created would fail
+> with a bare `E11000`. Readers use `user.membershipId ?? null`. Fixed in Unit 08 —
+> the bug was latent until `POST /api/team` (Unit 10) had a way to create staff.
+
 ## Counter (`counters`)
 `{ _id: string (e.g. "membership-2026"), seq: number }` — atomic sequence generator.
 
@@ -33,19 +39,20 @@ Refs are ObjectIds. "(idx)" = index. Define every enum in `lib/constants.ts` and
 ## Book (`books`)
 | Field | Type | Notes |
 |---|---|---|
-| title | string required (text idx) | |
+| title | string required, 2–200 (text idx) | |
 | slug | string unique idx | from title + short id suffix |
 | authors | string[] required, ≥1 (text idx) | |
-| isbn | string, unique sparse idx | Stored normalised (digits/X, no hyphens); validate ISBN-10/13 checksum |
-| publisher, edition | string optional | |
+| isbn | string, unique sparse idx | Stored normalised (digits/X, no hyphens); validate ISBN-10/13 checksum. **No `default`** — see below |
+| publisher | string optional | |
+| edition | string optional | |
 | publishedYear | number optional (1000..currentYear+1) | |
 | language | string default "English" (idx) | |
 | category | ref Category required (idx) | |
 | tags | string[] (text idx) | lowercase |
 | description | string, ≤2000 | |
-| pageCount | number optional | |
+| pageCount | number optional (1..10000) | |
 | cover | `{ url, publicId }` optional | Cloudinary |
-| shelfLocation | string optional | e.g. "A-12-3" |
+| shelfLocation | string optional, ≤20 | e.g. "A-12-3" |
 | totalCopies | number ≥1 | |
 | availableCopies | number ≥0, ≤ totalCopies | System-managed |
 | status | enum `active|archived` default `active` (idx) | |
@@ -55,6 +62,23 @@ Refs are ObjectIds. "(idx)" = index. Define every enum in `lib/constants.ts` and
 | addedBy | ref User | |
 
 Text index: `{ title, authors, tags, isbn }` weights title 5, authors 3, tags 2, isbn 4. Compound idx `{ status, category, createdAt }`.
+
+> **`isbn` has no `default`,** for the same reason `User.membershipId` does not: a
+> sparse unique index treats an absent field as absent but a stored `null` as a
+> value, so a default would mean only **one** book in the whole catalog could lack an
+> ISBN and the second would fail with `E11000 duplicate key … isbn_1`. `createBook`
+> omits the key when there is no ISBN; `updateBook` assigns `undefined` (Mongoose
+> `$unset`s it) to clear one. Readers see `book.isbn ?? null`.
+>
+> Every length/range cap here must **match `lib/validators/book.ts` exactly.** They
+> disagreed in Unit 08 (title 300 vs 200, shelf 40 vs 20, pageCount unbounded vs
+> 10000), which meant the validator accepted input the schema rejected and the user
+> saw a generic 500 instead of a field error.
+>
+> Every list sort ends in a **unique tiebreaker** (`_id`). Books created together share
+> a `createdAt` to the millisecond, so sorting on `createdAt` alone leaves ties to
+> Mongo and is not stable between queries — page 1 and page 2 of the same filter could
+> return the same row and skip another.
 
 ## Loan (`loans`)
 | book (ref, idx) | member (ref, idx) | issuedBy (ref User) | issuedAt (Date) | dueDate (Date, idx) | returnedAt (Date, null) | receivedBy (ref User, null) | renewCount (number default 0) | status enum `active|returned` (idx) | fineAmount (number default 0) | notes (string) |

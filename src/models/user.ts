@@ -35,7 +35,15 @@ const UserSchema = new Schema<UserDoc>(
       select: false,
     },
     role: { type: String, enum: ROLES, default: "member", index: true },
-    membershipId: { type: String, default: null, unique: true, sparse: true, trim: true },
+    /**
+     * Members only. **No `default: null`** — a `sparse` unique index skips documents
+     * where the field is absent, but a stored `null` counts as a value. With a
+     * default, every staff account (librarian, admin) would collide on
+     * `membershipId_1` and the second one ever created would fail with a bare
+     * `E11000`. Staff records must omit the key entirely, exactly as
+     * `data-model.md` documents; reads use `user.membershipId ?? null`.
+     */
+    membershipId: { type: String, unique: true, sparse: true, trim: true },
     phone: { type: String, default: null, trim: true, maxlength: 32 },
     department: { type: String, default: null, trim: true, maxlength: 120 },
     avatar: { type: AvatarSchema, default: null },

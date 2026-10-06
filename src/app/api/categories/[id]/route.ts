@@ -1,6 +1,6 @@
 import { handler, ok, parseBody, parseParams } from "@/lib/api";
 import { requireStaff } from "@/lib/auth/session";
-import { deleteCategory, updateCategory } from "@/lib/services/categories";
+import { deleteCategory, toCategorySummary, updateCategory } from "@/lib/services/categories";
 import { categoryIdSchema, updateCategorySchema } from "@/lib/validators/category";
 
 /** PATCH /api/categories/:id — staff. Re-slugs automatically on rename. */
@@ -11,7 +11,7 @@ export const PATCH = handler(
     const input = await parseBody(updateCategorySchema, request);
 
     const category = await updateCategory(id, input, { id: user.id, role: user.role });
-    return ok({ category });
+    return ok({ category: toCategorySummary(category) });
   },
   { name: "PATCH /api/categories/:id" },
 );

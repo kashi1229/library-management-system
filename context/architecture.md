@@ -52,7 +52,33 @@ from a `"use client"` file, fails the build with *"`server-only` cannot be impor
 Component"* / *"Can't resolve 'fs'"*. A loud build failure is the intended safety net — the alternative
 would be silently shipping `CLOUDINARY_API_SECRET` to the browser.
 
-### Image upload contract
+### Server → Client prop boundary (React Server Components)
+
+Next.js refuses to serialise anything carrying a `toJSON` across the RSC boundary:
+
+```
+Only plain objects can be passed to Client Components from Server Components.
+Objects with toJSON methods are not supported.
+```
+
+A lean Mongoose document qualifies, because its `_id` is an `ObjectId`. So **every
+Server Component must serialise service output before passing it to a Client
+Component**, using the same serialiser the API route uses:
+
+| Service output | Serialiser | Client shape |
+|---|---|---|
+| `listCategories()` | `toCategorySummary` (`lib/services/categories.ts`) | `CategorySummary` |
+| `getBook` / `listBooks` | built by `toApi` inside `lib/services/books.ts` | `BookSummary` / `BookDetail` |
+
+Both return `string` ids and ISO date strings, so the wire format and the declared
+type agree **by construction** rather than by relying on `JSON.stringify` to coerce an
+`ObjectId` for us.
+
+> **Never silence this with a cast.** `categories as unknown as CategorySummary[]`
+> makes `tsc` and `next build` pass while the page throws at render. A type error at
+> the call site is the point of declaring the serialised type on the service.
+
+## Image upload contract
 
 1. Client validates MIME type **and** extension and the size cap (fast UX check only).
 2. `POST /api/uploads/sign` returns `{ signature, timestamp, apiKey, cloudName, folder, allowedFormats,

@@ -1,9 +1,10 @@
 import type { NextResponse } from "next/server";
 import type { ApiFailure, ApiSuccess } from "@/lib/api";
 import type { FieldErrors } from "@/lib/api";
-import type { CategoryColor } from "@/lib/constants";
+import type { BookSort, CategoryColor } from "@/lib/constants";
 import type { CategoryIconName } from "@/lib/validators/category";
-import type { CloudinaryImage, PublicUser } from "@/types";
+import type { BookStatusFilter } from "@/lib/validators/book";
+import type { BookDetail, BookSummary, CloudinaryImage, PageMeta, PublicUser } from "@/types";
 
 /**
  * Typed client for the API.
@@ -55,7 +56,26 @@ export function buildQuery(query?: RequestOptions["query"]): string {
   return serialised ? `?${serialised}` : "";
 }
 
+/**
+ * Perform the request and return the envelope's `data`, discarding `meta`.
+ *
+ * Most endpoints have no pagination, so `request` stays the simple shape. List
+ * endpoints that do should use `requestWithMeta` instead of re-fetching or
+ * guessing totals from `items.length`, which is wrong the moment a page is full.
+ */
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return (await send<T>(path, options)).data;
+}
+
+/** As `request`, but keeps the pagination `meta` block from the envelope. */
+async function requestWithMeta<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ data: T; meta?: PageMeta }> {
+  return send<T>(path, options);
+}
+
+async function send<T>(path: string, options: RequestOptions = {}): Promise<ApiSuccess<T>> {
   const { method = "GET", body, signal } = options;
 
   const response = await fetch(`/api${path}${buildQuery(options.query)}`, {
@@ -77,7 +97,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     );
   }
 
-  return payload.data;
+  return payload;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -155,7 +175,12 @@ export const uploadsApi = {
 /* Categories                                                                  */
 /* -------------------------------------------------------------------------- */
 
-/** Public shape; mirrors `CategoryWithCount` on the server, serialised. */
+/**
+ * Public shape; mirrors `CategorySummary` on the server, serialised by
+ * `toCategorySummary`. Declared here as well as there for the same reason the book
+ * types live in `types/index.ts` — two copies of one interface drift, and the
+ * drift only surfaces as a type error somewhere unrelated.
+ */
 export type CategorySummary = {
   _id: string;
   name: string;
@@ -177,6 +202,80 @@ export type CategoryInput = {
   icon?: CategoryIconName;
   /** Always one of the six `CATEGORY_COLORS` keys. */
   color?: CategoryColor;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Books                                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Book payload shapes are declared in `types/index.ts` and re-exported here, so
+ * the client and the service cannot disagree about the wire format. See the note
+ * on `BookSummary` there.
+ */
+export type { BookDetail, BookSummary } from "@/types";
+
+/** The category object embedded in every book payload. */
+export type BookCategory = BookSummary["category"];
+
+/** Mirrors `createBookSchema`'s output; the form builds this shape directly. */
+export type BookInput = {
+  title: string;
+  authors: string[];
+  isbn?: string;
+  publisher?: string;
+  edition?: string;
+  publishedYear?: number;
+  language?: string;
+  category: string;
+  tags?: string[];
+  description?: string;
+  pageCount?: number;
+  shelfLocation?: string;
+  totalCopies: number | string;
+  cover?: CloudinaryImage | null;
+};
+
+/** Every filter the staff table can send, matching `staffBooksQuerySchema`. */
+export type BookListFilters = {
+  q?: string;
+  category?: string;
+  language?: string;
+  status?: BookStatusFilter;
+  sort?: BookSort;
+  page?: number;
+  limit?: number;
+};
+
+export const booksApi = {
+  /** Returns the page of books **and** its `meta`, so pagination is exact. */
+  list: (filters: BookListFilters = {}, signal?: AbortSignal) =>
+    requestWithMeta<{ items: BookSummary[] }>("/books", { query: filters, signal }),
+
+  get: (idOrSlug: string, signal?: AbortSignal) =>
+    request<{ book: BookDetail }>(`/books/${idOrSlug}`, { signal }).then((d) => d.book),
+
+  create: (input: BookInput) =>
+    request<{ book: BookDetail }>("/books", { method: "POST", body: input }).then((d) => d.book),
+
+  update: (id: string, input: Partial<BookInput>) =>
+    request<{ book: BookDetail }>(`/books/${id}`, { method: "PATCH", body: input }).then(
+      (d) => d.book,
+    ),
+
+  setArchived: (id: string, archived: boolean) =>
+    request<{ book: BookDetail }>(`/books/${id}/archive`, {
+      method: "POST",
+      body: { archived },
+    }).then((d) => d.book),
+
+  remove: (id: string) => request<{ id: string }>(`/books/${id}`, { method: "DELETE" }),
+
+  bulkArchive: (ids: string[]) =>
+    request<{ archived: number; ids: string[]; skipped: number }>("/books/bulk-archive", {
+      method: "POST",
+      body: { ids },
+    }),
 };
 
 export const categoriesApi = {

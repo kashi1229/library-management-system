@@ -223,6 +223,61 @@ export type Actor = {
   role: Role;
 };
 
+/**
+ * The book payload as it travels over the API.
+ *
+ * Defined here rather than in the service or in `api-client` because **both** need
+ * it: the service produces it and the client consumes it. When the two declared
+ * their own copies they drifted — the service emitted `isbn?: string | null`
+ * (optional, mirroring the Mongoose field) while the client declared it required —
+ * and passing a service result into a client component became a type error with no
+ * obvious cause. One shared shape makes that class of drift impossible.
+ *
+ * Note what is *not* here: `availableCopies` is present and readable, but it is
+ * never accepted from a client. Only circulation and total-copy edits write it
+ * (invariant 6).
+ */
+export type BookSummary = {
+  _id: string;
+  title: string;
+  slug: string;
+  authors: string[];
+  isbn: string | null;
+  publisher: string | null;
+  edition: string | null;
+  publishedYear: number | null;
+  language: string;
+  category: {
+    _id: string;
+    name: string;
+    slug: string;
+    icon: string;
+    color: CategoryColor;
+  };
+  tags: string[];
+  description: string | null;
+  pageCount: number | null;
+  cover: CloudinaryImage | null;
+  shelfLocation: string | null;
+  totalCopies: number;
+  /** System-managed. Only circulation services and total-copy edits change this. */
+  availableCopies: number;
+  status: BookStatus;
+  ratingAvg: number;
+  ratingCount: number;
+  borrowCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** A single book plus the two derived numbers the staff UI shows. */
+export type BookDetail = BookSummary & {
+  /** Copies currently out on loan: `totalCopies - availableCopies`. */
+  onLoan: number;
+  /** Waiting + ready reservations. Tells staff whether a delete would be blocked. */
+  waitingReservations: number;
+};
+
 /** Safe user projection — `passwordHash` must never appear. */
 export type PublicUser = {
   id: string;

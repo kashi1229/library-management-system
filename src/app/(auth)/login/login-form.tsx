@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { motion } from "motion/react";
@@ -20,9 +20,8 @@ import { loginSchema, type LoginInput } from "@/lib/validators/auth";
 import { authApi, toErrorMessage, ApiRequestError } from "@/lib/api-client";
 import { ROUTES } from "@/lib/constants";
 
-export function LoginForm() {
+export function LoginForm({ next }: { next: string | null }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { fadeUp, stagger } = useMotionVariants();
 
   const [serverError, setServerError] = React.useState<string | null>(null);
@@ -41,8 +40,10 @@ export function LoginForm() {
       toast.success(`Welcome back, ${user.name.split(" ")[0]}`);
 
       // Only same-origin paths are honoured, so `?next=` cannot be used to
-      // bounce a signed-in user to an attacker's site.
-      router.replace(safeInternalPath(searchParams.get("next")) ?? redirectTo);
+      // bounce a signed-in user to an attacker's site. `next` arrives as a prop
+      // from the server rather than from `useSearchParams`, which keeps the form
+      // out of Next's static-shell bailout — see the note on `LoginPage`.
+      router.replace(safeInternalPath(next) ?? redirectTo);
       router.refresh();
     } catch (error) {
       // Rate limiting is expected and actionable, so it gets its own tone.

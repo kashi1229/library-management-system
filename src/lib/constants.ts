@@ -35,8 +35,38 @@ export const MEMBERSHIP_ID_SEQUENCE_LENGTH = 4;
 export const BOOK_STATUSES = ["active", "archived"] as const;
 export type BookStatus = (typeof BOOK_STATUSES)[number];
 
-export const BOOK_SORTS = ["newest", "title", "popular", "rating"] as const;
+/**
+ * Staff table sorts. `newest|oldest|title|authors|popular|rating` are the whole
+ * set; the public catalog in Unit 09 uses the four that make sense to a reader.
+ */
+export const BOOK_SORTS = ["newest", "oldest", "title", "authors", "popular", "rating"] as const;
 export type BookSort = (typeof BOOK_SORTS)[number];
+
+export const BOOK_SORT_LABELS: Record<BookSort, string> = {
+  newest: "Newest first",
+  oldest: "Oldest first",
+  title: "Title A to Z",
+  authors: "Author A to Z",
+  popular: "Most borrowed",
+  rating: "Highest rated",
+};
+
+/** Languages offered in the book form, before the free-text fallback. */
+export const LANGUAGES = [
+  "English",
+  "Arabic",
+  "Bengali",
+  "Chinese",
+  "French",
+  "German",
+  "Hindi",
+  "Japanese",
+  "Portuguese",
+  "Russian",
+  "Spanish",
+  "Urdu",
+] as const;
+export type Language = (typeof LANGUAGES)[number];
 
 export const BOOK_AVAILABILITY = ["available", "all"] as const;
 export type BookAvailability = (typeof BOOK_AVAILABILITY)[number];

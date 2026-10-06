@@ -45,14 +45,25 @@ export function useIsHydrated(): boolean {
 }
 
 /**
- * `true` only when the user has asked for reduced motion.
+ * `true` only when the user has asked for reduced motion **and** the client has
+ * taken over from the server render.
  *
- * `useReducedMotion()` returns `null` during SSR and on the first client frame,
- * so both render `false` — server and client markup always agree. Once resolved,
- * the transform-free variant set takes over.
+ * `useReducedMotion()` returns `null` during SSR, but resolves to the real media
+ * query value on the **first client frame** — so reading it alone lets the variant
+ * set differ between the server HTML and the hydrated tree, and React reports:
+ *
+ *   A tree hydrated but some attributes of the server rendered HTML didn't match
+ *   the client properties.
+ *
+ * Folding in `useIsHydrated()` pins the first client render to the server snapshot,
+ * which makes the markup byte-identical. The swap happens one render later, which is
+ * the same one-frame cost `ui-context.md` already accepts for
+ * `useSyncExternalStore`-driven values.
  */
 export function usePrefersReducedMotion(): boolean {
-  return useReducedMotion() === true;
+  const prefers = useReducedMotion() === true;
+  const hydrated = useIsHydrated();
+  return hydrated && prefers;
 }
 
 /**

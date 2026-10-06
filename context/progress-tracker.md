@@ -1,14 +1,15 @@
-# Progress Tracker
+﻿# Progress Tracker
 
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell and profile.** Units 01–07 complete. Units 08 → 21 in
-  progress per the developer's instruction to complete the application rather than pause for review per unit.
+- **Phase 1 — Foundation, backend, auth, shell, profile and catalog management.**
+  Units 01–08 complete. Units 09 → 21 in progress per the developer's instruction to
+  complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 08 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- Next unit: **08 — Books (Catalog Management)**.
+- Build Units 09 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- Next unit: **09 — Public Catalog & Book Detail**.
 
 ## Completed
 
@@ -100,11 +101,77 @@ Update this file after every meaningful implementation change.
   banner renders · anonymous requests to all six protected route families redirect to `/login` ·
   user menu shows identity and membership ID.
 
+### Unit 08 — Books (Catalog Management) ✅
+- `lib/validators/book.ts` — `createBookSchema` / `updateBookSchema` / param and query schemas,
+  plus real **ISBN-10/13 mod-11 checksum** validation (`normalizeIsbn`, `isValidIsbn`).
+  `updateBookSchema` is composed from the same field schemas rather than
+  `createBookSchema.partial()`, so Zod 4's "`.partial()` keeps an inner `.default()`" trap
+  cannot clobber `language` on a partial update. Empty input on an optional numeric field
+  becomes `undefined`, not a NaN error. `BOOK_SORTS` / `BOOK_STATUS_FILTERS` /
+  `staffBooksQuerySchema` all live here; sorts are re-exported from `lib/constants` rather
+  than redeclared, because two arrays of the same names is how an option ends up accepted
+  by the API and missing from the toolbar.
+- `lib/services/books.ts` — `listBooks`, `getBook`, `createBook`, `updateBook`, `setArchived`,
+  `deleteBook`, `bulkArchive`. Copy arithmetic is by **delta**
+  (`availableCopies += newTotal − oldTotal`), so removing copies can never strand the count
+  below zero and the rejection names how many are out on loan. Delete is refused with
+  history (and separately with active holds) and only destroys the Cloudinary cover **after**
+  the row is gone, so a failed delete cannot orphan the image. Slugs de-duplicate.
+  All six actions audited; updates carry `before`/`after`.
+- Routes: `GET/POST /api/books`, `GET/PATCH/DELETE /api/books/:id`,
+  `POST /api/books/:id/archive`, `POST /api/books/bulk-archive`.
+  Every handler is `handler()` → `requireStaff()` → zod → one service call. The `status`
+  downgrade to `active` for non-staff lives in the **handler**, so it holds regardless of
+  which route reaches the service.
+- `lib/api-client.ts` gained `requestWithMeta`, because `request` discarded the envelope's
+  `meta` and pagination cannot be derived from `items.length` once a page is full.
+- **Wire shapes are declared once, in `types/index.ts`.** The service and the client had each
+  declared their own copy of the book payload and they drifted (service `isbn?: string | null`,
+  client `isbn: string | null`), which made passing a service result to a client component a
+  type error with no obvious cause.
+- **`toCategorySummary` / `toApi` are the only ways out of a service.** They existed and were
+  not used: the API route relied on `JSON.stringify` coercing ObjectIds to match its declared
+  type, and a Server Component passed lean Mongoose documents straight to a Client Component.
+  See Architecture §Server → Client prop boundary.
+- UI — `/staff/books` (toolbar: debounced search, category select, Active/Archived/All tabs,
+  sort menu, filter count + reset; DataTable with cover thumb, title+authors, mono ISBN,
+  category chip, availability bar, shelf, status, row menu; under `md` the same data renders
+  as stacked cards **with their own select-all**), `/staff/books/new` and
+  `/staff/books/[id]/edit` (two-column: cover uploader + live `BookCover` preview on the left,
+  Basic Info / Publication / Inventory on the right, **sticky action footer**).
+- `IsbnField` (live checksum tick, `aria-describedby` instead of an icon announcement),
+  `AuthorsInput` / `TagInput` (chips; authors commit on blur so a surname is never lost,
+  tags refuse duplicates with a `role="status"` message rather than dropping them silently),
+  `CopiesBar` (`role="progressbar"`, AA-safe `-ink` tones), `BookRowActionMenu`,
+  `BookCategoryChip`, `BookStatusPill`, `BookTableSkeleton`.
+- `src/hooks/use-book-filters.ts` — the URL is the source of truth for `q`, `category`,
+  `status`, `sort`, `page`. **History is per-kind**: discrete choices `push` (so Back undoes
+  them, per F5) while the debounced search box `replace`s (a keystroke must not create a
+  history entry). See the bugs section for why reconciling the debounce against the URL was
+  the hard part.
+- `src/hooks/use-unsaved-changes-guard.ts` — `beforeunload` for browser-level navigation, the
+  **Navigation API** for the hardware Back button (no click event to intercept), and a
+  capture-phase same-origin link interceptor as the fallback. It reports the blocked
+  destination and never navigates itself, so the host owns both the confirmation and a
+  client-side transition.
+- **Verified end to end against a real local MongoDB** — 73 API checks and 129 browser checks,
+  0 page errors, 0 unexpected console errors, 0 unexpected failed requests:
+  create → appears in the table with the right copies; raising/lowering `totalCopies`
+  recalculates `availableCopies` and lowering below the on-loan count is refused with the
+  number named; bad checksum / wrong length / duplicate ISBN each return a **field** error;
+  archive/restore both ways; delete refused for loan history and for active holds, and
+  allowed for a never-loaned book; search matches title, author, ISBN and tag; category filter,
+  six sorts and pagination all work and are shareable by URL; bulk archive is idempotent;
+  anonymous and member callers get 401/403 on all five mutation routes; the unsaved-changes
+  guard blocks a sidebar link, preserves the draft on "Keep editing", and really navigates on
+  "Discard"; Save is inside the viewport at 1920×1080, 1440×900, 1366×768, 1280×720 and
+  1024×640; 360/768/1280 × light/dark, no overflow, no mojibake, CLS ≈ 0; all six audit actions
+  present in the database with `before`/`after` on updates.
+
 ## Next Up
-1. **08** Books → **09** Public Catalog →
-   **10** Members & Team → **11/12** Circulation → **13** Fines → **14** Reservations →
-   **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards → **18** Reports & Audit →
-   **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
+1. **09** Public Catalog → **10** Members & Team → **11/12** Circulation → **13** Fines →
+   **14** Reservations → **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards →
+   **18** Reports & Audit → **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
 
 ### Unit 07 — Categories ✅
 - `lib/validators/category.ts` — `CATEGORY_ICON_NAMES` (**42-icon curated whitelist**), `createCategorySchema`,
@@ -202,6 +269,104 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
 - **A revoked blob URL latched forever** — `preview` was set once and never cleared, so after the first
   upload the preview pointed at a dead object URL and masked the real image.
 
+### Unit 08 — Books (bugs found by browser QA)
+Every item here passed `tsc`, `eslint` and `next build`. None was reachable from an API test.
+
+- **The books table never fetched anything.** The SWR key was `searchParams.toString()`, and
+  **SWR treats an empty-string key as "do not fetch"** — so the first load of `/staff/books`,
+  which has no query params, issued no request at all. The page rendered a confident
+  *"No books yet · 0 books"* over a catalog of 32 books. The key is now `pathname + "?" + query`,
+  which is always truthy. A page that renders a confident empty state is the most expensive kind
+  of bug: it looks correct.
+- **The fetcher received the cache key as its `signal`.** SWR invokes `fetcher(key)`, so a
+  fetcher declared `(signal?: AbortSignal) => …` was handed the **string key** and passed it
+  straight to `fetch`: `Failed to read the 'signal' property from 'RequestInit'`. Only visible
+  once the empty-key bug above was fixed and a request actually fired. Cancellation is now wired
+  by hand with an `AbortController`, and the fetcher deliberately takes no parameters.
+- **Every unauthenticated visit to a protected page 404'd.** `proxy.ts` built the login redirect by
+  assigning `url.pathname = "/login?next=/staff/books"`, and a *path* percent-encodes its `?`, so
+  the browser went to the literal route `/login%3Fnext%3D%2Fstaff%2Fbooks` and got the not-found
+  page. It survived the Unit 05 pass because the assertion was `url.includes("/login")`, which the
+  mangled URL still satisfies — **the test confirmed a string, not a destination.** It now builds
+  the query with `searchParams.set`, and the pass asserts on the destination path, the presence of
+  the login form, and the round-tripped `next` value.
+- **The edit form could never be saved for a book with a year or a page count.**
+  `<input type="number">` makes react-hook-form store a JS **number**, while `publishedYear` and
+  `pageCount` were declared `z.string()`. The form failed its own resolver with
+  `expected string, received number` and silently refused to save — for most books in a catalog.
+  Both now accept `string | number`, exactly as `totalCopies` always did. A schema that disagrees
+  with its own input element is invisible to every static check.
+- **A brand-new book could never be created at all.** `language` was seeded with `""` while the
+  schema requires `min(1)`, so a user who never touched the language picker could not submit.
+  Defaults to `"English"` now; an existing book keeps its stored value.
+- **The search box silently ate the first characters typed.** Three separate attempts failed the
+  same way, and the reasons differ enough to be worth writing down:
+  1. *"When `q` changes, copy it into `draft`"* — this fires for the hook's **own** debounced
+     write. Typing `Le Guin` over ~200 ms commits `L` 350 ms in, and `L` overwrites a draft that has
+     already reached `Le Guin`.
+  2. *Tracking "the last value I wrote"* — `router.replace` settles a **render late**, so for one
+     render `useSearchParams()` still returns the previous query. That is indistinguishable from an
+     external change, so the draft was cleared. Observed as `?q=Ln` and `?q=LGuin`.
+  3. The fix is **focus as the signal**: while the box has focus the user owns the value and the
+     debounce only moves the URL; once focus leaves, the URL wins. It cannot misfire on the lagging
+     URL, and it still covers Back, Reset and shared links.
+- **The unsaved-changes guard blocked the form's own post-save redirect.** `form.reset()` followed
+  by `router.push()` in the same tick leaves the listener installed with `dirty === true`, and
+  Next's router fires `navigate` *during* the push. The save succeeded, the redirect was cancelled,
+  and the user was left on the form they had just saved with no indication anything happened. The
+  host now calls `allowNavigation()` first. The flag is deliberately **not** consumed on first use,
+  because Next can emit more than one `navigate` per push and a self-clearing flag let the second
+  one block "Discard changes" instead.
+- **The discard prompt never opened.** `blockedHref` was recorded but nothing rendered from it, so
+  clicking a sidebar link on a dirty form swallowed the click silently and the form looked frozen.
+  One piece of state now drives both the intercept and the prompt.
+- **A hydration mismatch on the auth pages.** `useReducedMotion()` returns `null` on the server but
+  resolves to the real media query on the **first client frame**, so the variant set could differ
+  between server HTML and the hydrated tree. This was masked while the login page sat behind a
+  `<Suspense>` spinner (so the form never server-rendered); removing that fallback — see below —
+  exposed it. `usePrefersReducedMotion()` now folds in `useIsHydrated()`.
+- **Passing Mongoose documents to a Client Component.** `listCategories()` returns lean documents
+  whose `_id` is an `ObjectId`, and React refuses to serialise anything with a `toJSON` across the
+  RSC boundary: *"Only plain objects can be passed to Client Components from Server Components."*
+  An `as unknown as CategorySummary[]` cast made `tsc` and `next build` pass while the page threw at
+  render. Fixed by serialising with `toCategorySummary` — the same serialiser the API route now
+  uses — and the cast is gone. **A cast at this boundary defeats the only check that catches it.**
+- **Pagination could show the same book twice and skip another.** Every sort ended in a
+  non-unique field, so books sharing a `createdAt` to the millisecond (a bulk import, a seed script)
+  had no defined order and Mongo is free to return them differently between page 1 and page 2. All
+  six sorts now end in `_id`.
+- **`next build` was clean while the search box could not be typed into.** Found by the harness
+  asserting on the *URL* after typing rather than trusting the pass.
+- **Model caps disagreed with the validator** (title 300 vs 200, shelf 40 vs 20, pageCount
+  unbounded vs 10000), so the validator accepted input the schema rejected and the user saw a
+  generic 500 instead of a field error.
+- **Removed the `<Suspense>` spinner from the login page.** It existed only so `useSearchParams`
+  could work in a prerendered page; `?next=` is now read in the Server Component and passed as a
+  prop. That removes the visible spinner flash on the most-used page in the app *and* the subtree
+  replacement behind it.
+- **`data-scroll-behavior="smooth"`** was added to `<html>` because `globals.css` sets
+  `scroll-behavior: smooth` and Next.js logs a warning (and animates route scrolls) without it.
+
+### Unit 04/06/07 — earlier units
+- **`PasswordInput` swallowed `className`** — it applied the class to its wrapper `<div>` instead of
+  the `<input>`, so the Lock icon sat on top of the password text.
+- **`TextField` never padded custom controls** — `padded` was `Boolean(Icon) && !Control`, so the
+  `control` branch that receives `className` could never receive the padding.
+- **Checkbox pointer target was 18px** — below WCAG 2.2 SC 2.5.8. Added a transparent `::before`
+  overlay taking it to 24px. A harness measuring `getBoundingClientRect` therefore **cannot** see
+  the compliant target; it must read the pseudo-element too.
+- **Sidebar collapse did nothing visually** — `AppShell` hard-coded `w-[264px]` on the `<aside>`,
+  so the rail collapsed *inside* a fixed box. Fixed by lifting the preference into a `SidebarState`
+  context that both `AppShell` and `Sidebar` read.
+- **`server-only` leaked into the client bundle** — `ImageUploader` imported `UPLOAD_LIMITS` and
+  `withTransform` from the server module, dragging in the SDK and failing on `fs`.
+- **Every upload would have failed with `Invalid Signature`** — `max_file_size` was signed but never
+  sent. Caught by the security-review agent, not by any compiler.
+- **A newly uploaded avatar was never persisted** — `onChange` only touched client state and the next
+  server refresh clobbered it, leaving the API's avatar branch as dead code.
+- **A revoked blob URL latched forever** — `preview` was set once and never cleared, so after the
+  first upload the preview pointed at a dead object URL and masked the real image.
+
 ### Unit 07 — Categories (post-review fixes)
 Reported by the developer after the first commit, then verified in the browser:
 - **Save was unreachable on most laptops.** The dialog measured **1034px tall** and `DialogContent` has no
@@ -263,7 +428,9 @@ Reported by the developer after the first commit, then verified in the browser:
     is corrupted and a BOM is added. Use the editor tools instead.
 
 ## In Progress
-- Unit 08 — Books (Catalog Management). Not started.
+- Unit 09 — Public Catalog & Book Detail. Not started. `GET /api/books` and
+  `GET /api/books/:id` are already public, URL-synced and filter/sort/paginate, so this unit is
+  UI-only on the read side: the catalog grid, the filter panel, and the book detail page.
 
 ## Open Questions
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
@@ -280,15 +447,42 @@ Reported by the developer after the first commit, then verified in the browser:
   each found bugs that any test would have caught (broken signature, avatar never persisted, PATCH wiping
   icon and colour). Worth revisiting at Unit 21.
 - The browser QA harness lives outside the repo in `%LOCALAPPDATA%\Temp\opencode\qa` (puppeteer-core plus
-  the installed Chrome), so no QA dependency is added to the project.
+  the installed Chrome), so no QA dependency is added to the project. Unit 08 added `bootstrap08.mjs`
+  (fixtures), `books-api.mjs` (73 checks), `books-page.js` (129 checks), `books-audit.mjs` and
+  `run-unit08.ps1`.
+- **Fixtures must be data the app would actually accept.** A made-up ISBN in a seed document does not
+  fail loudly; it makes the *form* the thing under test, and the pass then reports a save failure instead
+  of a fixture mistake. All fixture ISBNs are checksum-valid, and are verified as such.
+- **Fixtures must not leak between runs.** Books created *through the app* carry no `__qa` flag, so
+  deleting only flagged documents let them accumulate; a stray title sorted ahead of `Kindred` and failed
+  an alphabetical assertion that was actually correct. `bootstrap08.mjs` deletes by `__qa`, by
+  `addedBy ∈ QA users`, and by a `^QA` title prefix.
+- **JSON does not survive a PowerShell argument** — `{a:"b"}` arrives as `{a:b}`. Pass structured data
+  through `$env:` instead.
+- **`$env:` does not persist between tool calls.** Re-seed the fixtures *and* re-export `QA_FIX` in the
+  same command as the test that needs it, or the fixture ids will not match the database.
 
 ## Architecture Decisions
 - Next.js 16 App Router (scaffold) + Mongoose 9 + Cloudinary signed uploads + jose JWT cookie sessions.
+- **A sparse unique index treats an *absent* field as absent but a stored `null` as a value.** So
+  `Book.isbn` and `User.membershipId` carry **no `default`**, writers omit the key, and readers use
+  `?? null`. A default on either field silently limits the catalog/library to one such record.
+- **A Server Component must serialise service output before passing it to a Client Component.**
+  Lean Mongoose documents carry a `toJSON` and React refuses to cross the boundary with them. Use
+  `toCategorySummary` / `toApi`; **never a cast**, which hides it from the only check that catches it.
+- **Wire shapes live in `types/index.ts`, once.** The service produces them and `api-client` consumes
+  them; two local copies drifted and produced a type error with no visible cause.
+- **Every list sort ends in a unique tiebreaker.** Non-unique sort keys make pagination
+  non-deterministic when rows share a timestamp.
+- **Schema field types must match what the control actually produces.** `<input type="number">`
+  yields a number to react-hook-form; a `z.string()` field then fails its own resolver.
+- **Filter history is per-kind:** discrete filter changes `push`, a debounced search box `replace`s.
+- **SWR cache keys must never be empty** — an empty-string key means "do not fetch".
 - Animation imports from `motion/react`; all timings live in `src/lib/motion.ts`.
 - Status colours ship as `-soft` tint + `-ink` foreground pairs to satisfy WCAG 2.2 AA.
 - Custom form controls receive `className` on the **input**, not a wrapper, so icon padding composes.
-- Controls keep a ≥40px pointer target even when the painted box is smaller (switch 24px, checkbox 18px),
-  via a transparent `::before` overlay.
+- Controls keep a ≥40px pointer target even when the painted box is smaller (switch 24px, checkbox
+  18px), via a transparent `::before` overlay.
 - The style guide lives at `/styleguide` behind a `(styleguide)` route group; a leading-underscore folder
   is a Next.js private folder and is excluded from routing.
 - **Icon names are whitelisted in `lib/validators/category.ts` and resolved only in `lib/icons.ts`.** The map
@@ -296,16 +490,20 @@ Reported by the developer after the first commit, then verified in the browser:
   resolve nor change identity between renders. A dynamic `import()` keyed on user input is never used.
 - **Long dialogs cap at `max-h-[calc(100dvh-2rem)]` with a pinned action row.** `DialogContent` has no
   height cap and centres itself with `translate-y-[-50%]`, so any dialog over ~1000px pushes its own
-  footer off-screen on a laptop with no way to scroll to it. Any future dialog with a form long enough to
-  hit this (Unit 08's book form will) must apply the same three-part layout: capped container, single
-  scrolling region, pinned footer.
+  footer off-screen on a laptop with no way to scroll to it. Long *pages* use the same idea with a
+  `fixed` action footer and matching `pb-32` on the form.
 - **Never unmount a form's only submit button.** A form with no submit button falls into the
-  implicit-submission path, where a real mouse click on a `type="button"` inside it submits anyway. Keep
-  the submit button mounted and disable it instead of swapping it out. Related: `el.click()` does not
+  implicit-submission path, where a real mouse click on a `type="button"` inside it submits anyway. Keep the
+  submit button mounted and disable it instead of swapping it out. Related: `el.click()` does not
   reproduce this class of bug — use a real mouse event in the harness.
 - **A dirty form must guard every close path**: Escape, the close button, Cancel and click-outside. Route
   them through one `requestClose()` so none can discard input silently. Do not nest a second modal for the
   confirmation — it strands focus inside a Radix dialog; use a pinned row instead.
+- **A guard must be able to stand down for a navigation the host initiates itself.** `dirty` is React
+  state and cannot be cleared synchronously, so `reset()` + `router.push()` in one tick is still
+  "dirty" when Next fires `navigate`. The host calls `allowNavigation()` first, and the flag is
+  cleared when the form becomes clean rather than on first use, because Next can emit more than
+  one `navigate` per push.
 - **`Field`'s `<label for>` must target a real control.** The pickers pass an explicit `htmlFor` (the icon
   search input, and the *selected* colour swatch — a `<button>` is a labelable element), so clicking a
   field label lands on the current control instead of dead-ending.
@@ -313,6 +511,10 @@ Reported by the developer after the first commit, then verified in the browser:
   `radiogroup` in this app must implement it: only the checked option is tabbable, arrows move the selection.
 - **Accent-coloured surfaces use a fixed ink, never `primary-foreground`.** The category hues do not flip
   per theme, so their foregrounds must not either. See `ui-context.md` §Accent inks.
+- **Never round-trip a source file through PowerShell `Get-Content -Raw` + `Set-Content`** — it reads the
+  system ANSI codepage, corrupting every non-ASCII character and adding a BOM. (Also: `Get-Content`
+  *display* of a UTF-8 file looks like mojibake even when the bytes are fine — check code points, not the
+  console.)
 
 ## Deviations from the Original Kit
 - **Next.js 16 / React 19 / Mongoose 9** instead of 15 / 19 / 8 — the scaffold and current registry
@@ -324,7 +526,9 @@ Reported by the developer after the first commit, then verified in the browser:
 - `feat/02-database-models` — Units 02 **and 03** (Unit 03's commit landed here before the branch was
   switched; both units are complete and verified, so history was left intact rather than rewritten).
 - `feat/04-auth-ui` — Unit 04.
-- `feat/05-app-shell` — Units 05, 06 and 07, plus the post-review dialog fix (all on the same branch).
+- `feat/05-app-shell` — Units 05, 06, 07 and **08** (all on the same branch).
+  - Unit 08 also fixes two Unit 02/05 defects that only became reachable now: the `isbn` /
+    `membershipId` sparse-index default, and the `proxy.ts` login redirect.
 
 ## First Admin Account
 Unit 07 needed a librarian to verify with, and the register endpoint only ever creates a member by design,
@@ -364,16 +568,40 @@ committed. Sign in with it to reach `/staff/*`; a member is silently redirected 
   directly in Mongo (bcrypt cost 10, matching `lib/auth/password.ts`; **omit `membershipId`** on staff —
   the sparse unique index rejects a stored `null`). There is no public path to a staff account: register
   only ever makes a member, and `POST /api/team` does not arrive until Unit 10.
-- A background dev server dies between tool calls. Run the server start **and** the browser check inside a
-  single command, otherwise the probe hits `ERR_CONNECTION_REFUSED`. `run-unit07.ps1` in the QA folder is the
+- **Fixtures must be deterministic across runs** — see the two notes above.
+- **A background dev server dies between tool calls.** Run the server start **and** the browser check inside a
+  single command, otherwise the probe hits `ERR_CONNECTION_REFUSED`. `run-unit08.ps1` in the QA folder is the
   working pattern: clean `.next` → seed fixtures → start server → poll `/api/health` → API pass → browser
   pass → audit read → stop server.
 - Browser QA harness lives in `%LOCALAPPDATA%\Temp\opencode\qa` (puppeteer-core + the installed Chrome) so
   no QA dependency is added to the project.
 - **Read the screenshots.** Every assertion passed on the Unit 07 pass that first revealed the truncated card
-  names and the mojibake. Assert on what a user would notice — text clipping, encoding, contrast — not only
-  on presence and count.
+  names and the mojibake. Assert on what a user would notice — text clipping, encoding, contrast, an
+  unreachable control — not only on presence and count.
+- **Assert on the destination, never on a substring of the URL.** `url.includes("/login")` passes for
+  `/login%3Fnext%3D…`, which is a 404. That is how a completely broken redirect survived a whole unit.
+- **A page that renders a confident empty state is the most expensive kind of bug.** "No books yet ·
+  0 books" over a catalog of 32 looked exactly like a correct empty list. Assert that the request fired
+  and that rows exist, not that the empty state renders nicely.
+- **When a check fails, dump what the user would have seen** — URL, `h1`, first 600 characters of body
+  text, a screenshot, and the *named* step that was running. A bare `TimeoutError: waiting for selector`
+  costs a whole debugging cycle.
+- **Assert a field's content after typing it.** Character loss in a controlled/debounced input is
+  invisible to every check that only asserts on the resulting URL.
+- **Report partial results on a crash.** A harness that prints only on success loses the 39 checks that
+  already told you which block was reached.
+- **Isolate cookie jars.** Tabs in one Puppeteer browser share cookies, so an "anonymous" tab opened
+  after signing in is still authenticated and the anonymous assertions silently test a signed-in user.
+  Use `browser.createBrowserContext()`.
+- **Auto-accept native `beforeunload` dialogs in automation.** An unanswerable native prompt blocks
+  `page.goto` until it times out and the run dies with an unrelated-looking navigation error.
+- **Wait for hydration before clicking.** The server-rendered form exists before React attaches; a click
+  in that window is a plain native submit with no fetch and no session cookie. Wait for a
+  client-only affordance, then assert you are actually signed in.
 - The React Compiler rules **are** live in this project: `react-hooks/static-components` rejects a component
-  resolved into a JSX tag during render, and `react-hooks/refs` rejects writing a ref during render. Build
-  against them instead of around them.
+  resolved into a JSX tag during render, `react-hooks/refs` rejects reading a ref during render,
+  `react-hooks/immutability` rejects mutating a hook argument (rename a ref to `*Ref` to make it legal),
+  and `react-hooks/exhaustive-deps` requires the callback an effect calls. Build against them, not around them.
+- `useReducedMotion()` returns `null` on the server but resolves on the **first client frame**, so it must
+  be gated by `useIsHydrated()` or the animated markup will not match.
 
