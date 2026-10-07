@@ -1,10 +1,12 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BookCheck,
   BookOpen,
+  BookPlus,
   Hourglass,
   IdCard,
   KeyRound,
@@ -112,6 +114,17 @@ export function MemberHeader({ member }: { member: MemberDetail }) {
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2">
+          {/* F6's "issue a book" quick action. It opens the desk with this member already
+              chosen, so a librarian reading a member does not have to go and re-type them.
+              `asChild` renders the real link, so it is openable in a new tab and has an
+              href to copy — a `router.push` button would have neither. */}
+          <Button variant="accent" asChild>
+            <Link href={`/staff/circulation?memberId=${member.id}`}>
+              <BookPlus className="size-4" aria-hidden="true" />
+              Issue a book
+            </Link>
+          </Button>
+
           {suspended ? (
             <Button variant="default" onClick={reinstate} disabled={reinstating}>
               <ShieldCheck className="size-4" aria-hidden="true" />

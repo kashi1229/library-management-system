@@ -8,11 +8,74 @@ Update this file after every meaningful implementation change.
   complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 11 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- **Unit 11 complete; Unit 12 (circulation UI) is next** — the desk screen over the API
-  built here.
+- Build Units 12 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- **Units 11 and 12 complete; Unit 13 (Fines) is next** — `createFineIfLate` is waiting.
 
 ## Completed
+
+### Unit 12 — Circulation UI ✅ · `feat/12-circulation-ui`
+- **`/staff/circulation`** — the desk. Two search cards side by side (member, book), an
+  issue ticket with a policy checklist, then the filterable loan table. Above the fold
+  because issuing and returning are the two things that happen here thousands of times.
+- **`/my-loans`** — the member's own loans. Current (cards + countdown ring) and History
+  (compact rows).
+- **The member record gained its "Issue a book" action** (F6), a real `<Link>` to
+  `/staff/circulation?memberId=…` so it is openable in a new tab and has an href to copy.
+- `GET /api/settings/public` added — a **display-safe policy subset**, unauthenticated. The
+  countdown ring needs `loanPeriodDays` and a member must not need a staff session to see
+  their own loan period, but this must not be a settings dump: `contactEmail`,
+  `fineBlockThreshold`, `maxFinePerLoan` and `lastMaintenanceAt` are deliberately excluded,
+  and the type is a hand-written subset rather than `SettingDoc` so a field added later
+  is not exposed by accident.
+- **`useRemoteCombobox`** (`src/hooks/`) — the debounce, abort, stale-result and keyboard
+  logic the two comboboxes share, extracted rather than written twice. It is the subtle
+  part of both:
+  - **results are stored keyed by the term that produced them** and the visible list is
+    *derived* by comparing that key with the current term. That removes every synchronous
+    `setState` from the effect body (`react-hooks/set-state-in-effect`, and it is right to:
+    the effect runs after paint, so the UI would briefly show results for a term the user
+    has already moved past) while guaranteeing a stale list can never be shown.
+  - the highlight is **derived-clamped**, not corrected in an effect, so an out-of-range
+    highlight can never even paint.
+  - **one `choose` path** for click and Enter, so clearing the list cannot happen on one
+    interaction and not the other.
+  - `onChoose` is read through a ref **written in an effect**, never during render —
+    `react-hooks/refs` caught the render-phase version.
+- `use-loan-filters.ts` carries Unit 08's **focus-owns-the-value** rule and the per-kind
+  history rule rather than rediscovering them, and also syncs `memberId` / `bookId` so a
+  deep link survives a reload.
+- **Two comboboxes, not two `Select`s.** A member is searched across potentially thousands
+  of rows, so the control must filter remotely. Rows are chosen with `onMouseDown` +
+  `preventDefault` so the click lands *before* the input's blur unmounts the list;
+  `onClick` loses that race.
+- `BookSearchCombobox` asks for `status: "active"`, so **archived books are never offered**
+  rather than being selectable and then refused. A book with no free copy stays selectable
+  and badged "None left", because the librarian may be about to return it and the ticket
+  explains the refusal in a sentence they can read to the member.
+- **`IssueTicket`'s checklist is a preview, never the gate.** Every check can be stale —
+  another librarian can take the last copy between the search and the click — so the server
+  remains the authority and its sentence is shown verbatim in a toast. The **unpaid-fine
+  check is `unknown`, not a green tick**: the member lookup returns no fine total, and a
+  checkmark asserting something nothing has verified is the one check a member would be
+  most upset to get wrong. Disabled buttons carry a reason, because a dead button with no
+  explanation is the most common desk complaint there is.
+- **`LoansTable` renders both layouts from one array** — a real `<table>` from `md` up and
+  stacked cards below — the same decision as `MembersTable` and the books table.
+- **`MyLoanCard`'s ring is the centrepiece** because days remaining is the only thing a
+  member is asking. The number is **real text**, not SVG content, so it scales, is
+  selectable and is announced once via `role="status"`; the arc is decoration that follows
+  the number. Renewal is **optimistic** and rolls back on failure, and the reason is a
+  `title` *and* an `sr-only` line, because a `title` alone is unreachable by touch.
+- Renew is the **only non-staff mutation** and the ownership check lives in the service, so
+  the button's refusal copy is a preview and the server's message wins.
+- The **overdue ribbon is a left edge, not a diagonal fold** — a diagonal clips the rounded
+  corner and reads as damage rather than as a state.
+- `MemberBookRef` is `LoanBookRef`, so `slug` reaches the member record and the member's
+  tabs now link straight to `/catalog/[slug]` instead of the search-query workaround that
+  existed only because the slug was missing.
+- Verified: `tsc`, `eslint` and `next build` clean; `/staff/circulation`, `/my-loans` and
+  `/api/settings/public` all present. **Not** browser-verified — the mutations still cannot
+  run against the standalone dev database (see below).
 
 ### Unit 11 — Circulation Services & API ✅ · `feat/11-circulation`
 - `lib/services/circulation.ts` — `issueLoan`, `returnLoan`, `renewLoan`, `listLoans`,
@@ -318,16 +381,30 @@ tracker before this unit started.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **12** Circulation UI → **13** Fines → **14** Reservations →
-   **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards →
-   **18** Reports & Audit → **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
-   - **Unit 12 is blocked on the dev database being a replica set.** The desk screen issues,
-     returns and renews, so every button needs the mutations to work. Decide that first —
-     see "Unit 11 — BLOCKED at runtime locally" above.
-   - `GET /api/members/lookup` (Unit 10) and `membersApi.lookup` are already the member
-     type-ahead the issue form needs. Do not build a second lookup.
-   - `loansApi.list` gives the desk its filterable table; `deriveLoanState` already puts
-     `view`, `daysLeft` and `daysOverdue` on every row, so no client-side date arithmetic.
+1. **13** Fines → **14** Reservations → **15** Wishlist & Reviews →
+   **16** Notifications → **17** Dashboards → **18** Reports & Audit → **19** Settings →
+   **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
+   - **Unit 13 unblocks circulation's return path.** `createFineIfLate` in
+     `lib/services/hooks.ts` computes the lateness and returns `null`; it needs to create the
+     `Fine` document and write `loan.fineAmount`. Until then the desk's Return dialog
+     promises a fine it cannot create, which is why its copy is written to work either way.
+   - **Unit 14 unblocks the queue.** `promoteReservationQueue` and
+     `fulfilReadyReservationIfAny` are no-ops, so a returned copy is not offered to the
+     member waiting for it and a collected hold is left dangling.
+   - Both still need the **replica set** question answered before they can be exercised.
+   - `GET /api/members/lookup` and `loansApi.list` already serve the Unit 12 UI; do not
+     build second versions.
+
+### Unit 12 — deliberately not done
+- **No browser verification.** `tsc`, `eslint` and `next build` are clean and all three
+  routes are present, but the issue/return/renew buttons cannot be exercised until the dev
+  database is a replica set. The **read** paths (loan list, policy, member lookup, book
+  search) do work today and are worth a look.
+- **Policy check parity is client-preview only.** The issue ticket checks four of the five
+  rules client-side; the fine check is `unknown` on purpose.
+- `renewalExtensionDays` was added to the public settings subset for the optimistic preview.
+  It is arguably a display value a member should see anyway ("each renewal adds 7 days"),
+  which is why it belongs there rather than only being read from the server response.
 
 ### Unit 09 — Public Catalog & Book Detail ✅
 - `src/app/(public)/layout.tsx` — a public shell deliberately **not** `AppShell`: a visitor
@@ -891,20 +968,17 @@ hard-coded.
   rather than showing a button that does nothing.
 
 ## In Progress
-- Unit 12 — Circulation UI. Not started. The API from Unit 11 is in place; this is the desk
-  screen over it: a two-pane issue form (member type-ahead via `membersApi.lookup`, book by
-  id/slug/title), the active-loans table with `on_time / due_soon / overdue` chips and
-  one-click return/renew, and the due-soon and overdue queues.
-  - `use-loan-filters.ts` should follow `use-member-filters.ts`: URL is the source of truth,
-    discrete filters `push`, the debounced search `replace`s, focus-owns-the-value.
-  - **The SWR fetcher must take no positional parameters.** That bug cost Unit 08 and
-    Unit 09 a full unit each, and an HTTP status check cannot see it — the page returns 200
-    with a correct-looking shell while nothing loads.
-  - Member row actions can link into the desk (`/staff/circulation?memberId=…`), which is
-    the Unit 10 detail page's "issue a book" quick action from F6.
-- **Open decision for the developer: convert the local `mongod` to a single-node replica
-  set?** It requires restarting their database service. Until then Unit 12 cannot be
-  exercised in the browser, only built.
+- Unit 13 — Fines. Not started. `createFineIfLate` (the Unit 11 stub) is the first thing to
+  fill in, then `POST /api/fines/:id/collect` and `/waive`, the staff Fines page and the
+  member Fines page.
+  - `Fine.loan` is **unique**, so one fine per loan — a second return cannot double-charge,
+    and a duplicate is an `E11000` that `handler` already maps to a 409.
+  - `unpaid → paid | waived` are terminal; neither may transition again.
+  - `fineBlockThreshold` is deliberately **not** in the public settings subset, so the
+    client cannot pre-judge whether a member is blocked. The server says so.
+- **Open decision for the developer, still unanswered: convert the local `mongod` to a
+  single-node replica set?** It requires restarting their database service. Until then
+  Units 11–14 can be built but not exercised.
 
 ## Open Questions
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
@@ -1083,6 +1157,31 @@ hard-coded.
   the stored document has to be inspected.
 - **`export type { X } from "@/types"` does not bring `X` into local scope.** A file that
   both re-exports and uses a type needs the separate `import type` as well.
+- **Store async results keyed by the term that produced them, and derive visibility.**
+  This is the React 19 answer to "don't `setState` synchronously in an effect": instead of
+  clearing results in the effect's early-return branch, compare the stored term with the
+  current one during render. A stale list can then never paint, with no flash and no
+  effect-driven state write. Applies to every debounced search.
+- **Clamp a derived index during render, not in an effect.** A shorter result list must not
+  leave the highlight past its end — but correcting it with `setState` in an effect is the
+  same lint violation as everything else, and slower. Derive it.
+- **One `choose` path for click and Enter.** When the two interactions live in different
+  places, "clear the list after choosing" reliably gets applied to one of them.
+- **Never read or write a ref during render.** `react-hooks/refs` catches both. The pattern
+  that satisfies it and stays correct: write the ref in an effect, read it in an event
+  handler.
+- **A remote picker must choose rows on `onMouseDown`, not `onClick`.** The input's blur
+  unmounts the list, and `onClick` fires after that.
+- **Type an optional sub-resource as a hand-written subset, never as the full document.**
+  `PublicSettings` is `Pick<SettingDoc, …>` on purpose: it is a display endpoint, and a field
+  added to the settings singleton later must not be exposed by accident.
+- **A client-side policy check that cannot be verified must be `unknown`, not a green
+  tick.** The member lookup returns no fine total, so the fine check renders as unknown —
+  a checkmark asserting something nothing has checked is the one a member would be most
+  upset to get wrong. Preview checks are for **enabling a button**, never for blocking one;
+  the server's sentence must be able to win.
+- **A disabled button must carry its reason.** In `title` *and* as visible or `sr-only`
+  text, because a `title` alone is unreachable by touch and by keyboard.
 - **Never unmount a form's only submit button.** A form with no submit button falls into the
   implicit-submission path, where a real mouse click on a `type="button"` inside it submits anyway. Keep the
   submit button mounted and disable it instead of swapping it out. Related: `el.click()` does not

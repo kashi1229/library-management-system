@@ -518,6 +518,32 @@ export const loansApi = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Public settings (spec 12)                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The display-safe policy subset. Declared here rather than reusing `SettingDoc`, because
+ * this endpoint's whole contract is that it returns **less** than the settings singleton —
+ * typing it as the full document would be an invitation to widen it.
+ */
+export type PublicPolicy = {
+  libraryName: string;
+  loanPeriodDays: number;
+  maxActiveLoans: number;
+  maxRenewals: number;
+  /** Days a single renewal adds. Shown so the optimistic preview can match the server. */
+  renewalExtensionDays: number;
+  finePerDay: number;
+  currencySymbol: string;
+  reservationHoldHours: number;
+};
+
+export const settingsApi = {
+  /** Public and unauthenticated. Used to render due dates and policy copy. */
+  public: (signal?: AbortSignal) => request<PublicPolicy>("/settings/public", { signal }),
+};
+
+/* -------------------------------------------------------------------------- */
 /* Shared response shapes used by later units                                  */
 /* -------------------------------------------------------------------------- */
 

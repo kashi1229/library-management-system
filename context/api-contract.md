@@ -100,6 +100,9 @@ Notes added in Units 08–09:
 All three mutations run in a Mongo transaction, so they need a **replica set** (Atlas
 provides one; a standalone local `mongod` does not — see the progress tracker).
 
+## Public settings
+| GET | /settings/public | — | Display-safe policy subset: `libraryName, loanPeriodDays, maxActiveLoans, maxRenewals, renewalExtensionDays, finePerDay, currencySymbol, reservationHoldHours`. **Unauthenticated** — a member needs the loan period to read their own countdown. Deliberately excludes `contactEmail`, `fineBlockThreshold`, `maxFinePerLoan` and `lastMaintenanceAt`
+
 ## Reservations
 | GET | /reservations/mine | M | |
 | GET | /reservations | S | Filters `status, bookId` |

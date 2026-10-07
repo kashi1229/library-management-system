@@ -86,6 +86,7 @@ export type PublicSettings = Pick<
   | "loanPeriodDays"
   | "maxActiveLoans"
   | "maxRenewals"
+  | "renewalExtensionDays"
   | "finePerDay"
   | "currencySymbol"
   | "reservationHoldHours"
@@ -98,6 +99,9 @@ export async function getPublicSettings(): Promise<PublicSettings> {
     loanPeriodDays: s.loanPeriodDays,
     maxActiveLoans: s.maxActiveLoans,
     maxRenewals: s.maxRenewals,
+    // A member pressing Renew needs to know how many days they are buying, and the card
+    // previews the new due date optimistically before the server confirms it.
+    renewalExtensionDays: s.renewalExtensionDays,
     finePerDay: s.finePerDay,
     currencySymbol: s.currencySymbol,
     reservationHoldHours: s.reservationHoldHours,

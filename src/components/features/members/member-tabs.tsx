@@ -554,10 +554,13 @@ function ReservationRow({ hold }: { hold: MemberReservation }) {
 /**
  * A book title that links to the public catalog page.
  *
- * `/catalog/[slug]` is the public route, so this works for a librarian previewing what
- * the member sees. `MemberBookRef` carries no `slug`, and inventing one from the title
- * would break on every title that needed slugifying — so this links to the catalog search
- * for the title, which always resolves.
+ * `MemberBookRef` is `LoanBookRef`, so the slug is part of the payload and this links
+ * straight to `/catalog/[slug]`. It used to fall back to `/catalog?q=<title>` because the
+ * member record carried no slug — reconstructing a slug from a title breaks on every title
+ * that needed slugifying, and a search for the title is not the same page.
+ *
+ * `slug` is empty only for the "No longer in the catalog" placeholder, so the fallback
+ * keeps that row clickable rather than rendering a dead link.
  */
 function BookLink({
   book,
@@ -566,9 +569,11 @@ function BookLink({
   book: MemberLoan["book"];
   className?: string;
 }) {
+  const href = book.slug ? `/catalog/${book.slug}` : `/catalog?q=${encodeURIComponent(book.title)}`;
+
   return (
     <Link
-      href={`/catalog?q=${encodeURIComponent(book.title)}`}
+      href={href}
       className={`underline-offset-2 hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/45 focus-visible:outline-none ${className ?? ""}`}
     >
       {book.title}
