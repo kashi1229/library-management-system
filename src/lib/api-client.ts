@@ -394,6 +394,14 @@ export const membersApi = {
   list: (filters: MemberListFilters = {}, signal?: AbortSignal) =>
     requestWithMeta<{ items: MemberSummary[] }>("/members", { query: filters, signal }),
 
+  /**
+   * One member by id, with their whole record.
+   *
+   * This is what the circulation desk's deep link needs: the "Issue a book" link carries
+   * `?memberId=<Mongo ObjectId>`, and `lookup` searches **name, email and membership ID** —
+   * not `_id` — so passing an ObjectId to `lookup` returns an empty list and the desk
+   * silently arrives with nobody selected.
+   */
   get: (id: string, signal?: AbortSignal) =>
     request<{ member: MemberDetail }>(`/members/${id}`, { signal }).then((d) => d.member),
 

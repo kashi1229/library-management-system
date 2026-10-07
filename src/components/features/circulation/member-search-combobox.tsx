@@ -59,7 +59,7 @@ export function MemberSearchCombobox({
   /* ------------------------------- Selected ------------------------------- */
   if (value) {
     return (
-      <div className={cn("rounded-lg border border-border bg-muted/40 p-4", className)}>
+      <div className={cn("min-w-0 rounded-lg border border-border bg-muted/40 p-4", className)}>
         <div className="flex items-center gap-3">
           <Avatar className="size-10 shrink-0">
             {value.avatar ? (

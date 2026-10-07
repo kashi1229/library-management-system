@@ -61,7 +61,7 @@ export function BookCover({
           className="object-cover"
         />
       ) : (
-        <GeneratedCover title={title} author={author} color={resolved} />
+        <GeneratedCover title={title} author={author} color={resolved} compact={width <= COMPACT_COVER_WIDTH} />
       )}
       <span
         aria-hidden="true"
@@ -76,31 +76,59 @@ function GeneratedCover({
   title,
   author,
   color,
+  compact,
 }: {
   title: string;
   author?: string | null;
   color: (typeof CATEGORY_COLOR_CLASS)[CategoryColor];
+  /**
+   * Below this width the title is **not rendered at all**.
+   *
+   * The typographic fallback uses `p-4` and body-size type. At 56px wide that leaves about
+   * 24px of content, so "Structure and Interpretation of Computer Programs" rendered as
+   * "Str / and / Har" over three lines — a cover that looks broken rather than generated.
+   * At 32px it left nothing at all and the text was clipped away invisibly, which is why the
+   * row covers looked fine and the issue-ticket cover looked wrong: same component, one
+   * size above a threshold nobody had drawn.
+   *
+   * A flat category tint is the honest rendering at that size, and every place a cover is
+   * this small also shows the real title and author next to it.
+   */
+  compact: boolean;
 }) {
   return (
-    <div className={cn("relative flex h-full w-full flex-col justify-between p-4", color.bg)}>
+    <div
+      className={cn(
+        "relative flex h-full w-full flex-col justify-between",
+        compact ? "p-0" : "p-4",
+        color.bg,
+      )}
+    >
       <span
         aria-hidden="true"
         className="absolute inset-x-0 top-0 h-1/3 bg-linear-to-b from-background/20 to-transparent"
       />
-      <p
-        className={cn(
-          "line-clamp-5 font-display text-small font-semibold leading-tight tracking-[-0.01em]",
-          color.on,
-        )}
-      >
-        {title}
-      </p>
-      {author ? (
-        <p className={cn("line-clamp-2 text-caption", color.on)}>{author}</p>
-      ) : null}
+      {compact ? null : (
+        <>
+          <p
+            className={cn(
+              "line-clamp-5 font-display text-small font-semibold leading-tight tracking-[-0.01em]",
+              color.on,
+            )}
+          >
+            {title}
+          </p>
+          {author ? (
+            <p className={cn("line-clamp-2 text-caption", color.on)}>{author}</p>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
+
+/** Rendered widths at or below this drop the generated title entirely. */
+const COMPACT_COVER_WIDTH = 72;
 
 /** Fall back to `forest` so an unknown category key never produces an undefined class. */
 function resolveColor(value: CategoryColor | string | null | undefined) {

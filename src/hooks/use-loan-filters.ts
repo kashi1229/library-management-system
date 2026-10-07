@@ -23,9 +23,17 @@ import { LOAN_VIEWS, type LoanView } from "@/lib/constants";
  * one piece of context.
  */
 
-/** The desk's four tabs map onto the derived loan views. */
+/**
+ * The desk's four tabs map onto the derived loan views.
+ *
+ * **Labels are short deliberately.** The section heading above them already says "Loans",
+ * so "Active loans" repeated it, and four triggers at that width overflowed a 390px
+ * viewport by ~18px — the tab list is `inline-flex w-fit`, so it cannot wrap and pushes
+ * the whole page into a horizontal scroll. At 360px, the documented minimum, the overflow
+ * was worse. "Active" is both shorter and less redundant.
+ */
 export const DESK_TABS = [
-  { value: "active", label: "Active loans" },
+  { value: "active", label: "Active" },
   { value: "due_soon", label: "Due soon" },
   { value: "overdue", label: "Overdue" },
   { value: "returned", label: "Returned" },

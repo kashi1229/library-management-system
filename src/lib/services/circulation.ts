@@ -261,6 +261,25 @@ export async function issueLoan(input: IssueLoanInput, actor: Actor): Promise<Lo
     }
 
     /*
+     * **Duplicate check comes before availability, deliberately.**
+     *
+     * A one-copy book that this member already holds satisfies *both* refusals. Checked in
+     * the other order, the librarian who fat-fingered the issue button is told "every copy
+     * is on loan" — which is true, and useless, because returning the copy would clear that
+     * message while the actual mistake (issuing the same book twice) went unmentioned.
+     * "You already have this on loan" names the thing they have to fix.
+     *
+     * It is also the cheaper query: one indexed `exists` against
+     * `loan_member_status`, versus the hold-count read the availability branch needs.
+     */
+    if (await Loan.exists({ member: memberId, book: book._id, status: "active" }).session(session)) {
+      throw AppError.rule(
+        `${member.name} already has “${title}” on loan. Return it before borrowing it again.`,
+        { bookId: "Already on loan to this member" },
+      );
+    }
+
+    /*
      * A copy set aside for a **ready** reservation is not available to anyone else
      * (business rule 1 / rule 6), so availability is
      * `availableCopies - holdsForOtherMembers`. The member's own hold is excluded,
@@ -294,12 +313,6 @@ export async function issueLoan(input: IssueLoanInput, actor: Actor): Promise<Lo
         `${member.name} already has ${activeLoans} ${activeLoans === 1 ? "book" : "books"} on loan. The limit is ${settings.maxActiveLoans}.`,
         { memberId: `The limit is ${settings.maxActiveLoans} books` },
       );
-    }
-
-    if (await Loan.exists({ member: memberId, book: book._id, status: "active" }).session(session)) {
-      throw AppError.rule(`${member.name} already has “${title}” on loan. Return it before borrowing it again.`, {
-        bookId: "Already on loan to this member",
-      });
     }
 
     const [fineAgg] = await Fine.aggregate<{ total: number }>([

@@ -78,10 +78,13 @@ export function CirculationDesk({ initialMemberId }: { initialMemberId?: string 
   /*
    * Preselect from the URL — the "Issue a book" action on a member's record.
    *
-   * Only fetched when `initialMemberId` is present, so the ordinary desk visit does not
-   * make a request nobody asked for. The result is written into the URL via `filters.set`
-   * so it survives a reload; without that, a shared link would arrive with the member
-   * preselected once and then quietly forget.
+   * **Fetches the record by id; it does not search for it.** The link carries
+   * `?memberId=<Mongo ObjectId>`, while `membersApi.lookup` searches *name, email and
+   * membership ID*. Handing it an ObjectId returns an empty list, so the desk silently
+   * arrived with nobody selected — a deep link that looked like it worked and did not.
+   *
+   * Only fetched when `initialMemberId` is present, so an ordinary desk visit makes no
+   * request nobody asked for.
    */
   React.useEffect(() => {
     if (!initialMemberId || member) return;
@@ -90,21 +93,25 @@ export function CirculationDesk({ initialMemberId }: { initialMemberId?: string 
 
     void (async () => {
       try {
-        const found = await membersApi.lookup(initialMemberId);
-        if (cancelled || !found[0]) return;
-        setMember(found[0]);
-        filters.set({ memberId: found[0].id });
+        const found = await membersApi.get(initialMemberId);
+        if (cancelled) return;
+
+        // `MemberRecord` carries `activeLoans`, which is what the ticket's loan-limit
+        // check reads, so no second request is needed.
+        setMember(found);
+        filters.set({ memberId: found.id });
       } catch {
-        // A bad id in the URL must not break the desk; the member simply stays unset.
+        // A stale id in the URL must not break the desk; the member simply stays unset.
       }
     })();
 
     return () => {
       cancelled = true;
     };
-    // Intentionally runs once for a given `initialMemberId`; `filters` changes every render.
+    // Intentionally runs once per `initialMemberId`; `filters` is a new object each
+    // render and depending on it would refetch in a loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMemberId]);
+  }, [initialMemberId, member]);
 
   /* ---------------------------- Issue a book ----------------------------- */
   const onIssued = React.useCallback(() => {
@@ -145,13 +152,20 @@ export function CirculationDesk({ initialMemberId }: { initialMemberId?: string 
         </h2>
 
         {/* Two cards side by side on desktop, stacked on mobile — the desk is a
-            two-pane task and on a phone the panes become steps. */}
+            two-pane task and on a phone the panes become steps.
+
+            **`min-w-0` on both is load-bearing.** A grid item defaults to
+            `min-width: auto`, which means it refuses to shrink below its content. The
+            selected-member and selected-book cards are wide (avatar + truncated name +
+            status badge), so the implicit track sized to max-content and pushed the page
+            36px past a 390px viewport — a horizontal scroll on the most-used staff screen.
+            `min-w-0` lets the track shrink and the `truncate` children do their job. */}
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-border bg-surface p-5 shadow-soft">
+          <div className="min-w-0 rounded-lg border border-border bg-surface p-5 shadow-soft">
             <MemberSearchCombobox value={member} onChange={setMember} autoFocus />
           </div>
 
-          <div className="rounded-lg border border-border bg-surface p-5 shadow-soft">
+          <div className="min-w-0 rounded-lg border border-border bg-surface p-5 shadow-soft">
             <BookSearchCombobox value={book} onChange={setBook} />
           </div>
         </div>

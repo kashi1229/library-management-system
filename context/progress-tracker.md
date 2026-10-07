@@ -408,30 +408,84 @@ causes**, which is why they arrived in one report.
   this**, because Mongoose's filter parameter is typed loosely enough to accept a Promise.
   Confirmed by the running server's own log, not by guessing from the browser stack.
   Fixed with the `await` and a comment explaining why it is load-bearing.
-  - This is the **fourth** time in this project that the browser stack pointed at the
-    caller and the real cause was only visible server-side. The browser trace for a 500 is
-    almost never the bug; it is the request that triggered it.
-- **Issuing a book fails on the replica-set limit — environmental, not a code defect.**
+- **Issuing a book failed on the replica-set limit — environmental, not a code defect.**
   `POST /api/loans/issue -> MongoServerError: Transaction numbers are only allowed on a
-  replica set member or mongos`. This is the blocker flagged twice already, now reached in
-  anger. It is *not* worked around: a non-transactional fallback would quietly break
-  invariant 5, which is the entire reason the mutations are transactional.
-  - **The fix is three lines in `C:\Program Files\MongoDB\Server\8.0\bin\mongod.cfg`**
-    (add `replication: { replSetName: rs0 }`), a Windows service restart, then
-    `rs.initiate()`. Awaiting the developer's go-ahead because it needs admin rights and
-    briefly stops their database.
-  - Until then the desk is fully readable and completely read-only.
+  replica set member or mongos`. Deliberately **not** worked around: a non-transactional
+  fallback would quietly reintroduce the exact data-corruption race the unit exists to
+  prevent, which is worse than a loud failure. **Now resolved** — see below.
+- **The duplicate-loan check ran *after* availability, giving the wrong reason.** A
+  one-copy book the member already holds satisfies both refusals. Checked in the old order,
+  a librarian who double-issued was told *"Every copy is on loan"* — true, and useless,
+  because returning the copy would clear that message while the actual mistake went
+  unmentioned. The duplicate check now runs **first**, so the refusal names the thing they
+  have to fix. It is also the cheaper query. Caught by asserting on the *message*, not the
+  status code: the 400 was already correct.
+- **The desk overflowed horizontally at 390px by 36px.** Both search panes are grid items,
+  and **a grid item defaults to `min-width: auto`**, so it refuses to shrink below its
+  content. The selected-member and selected-book cards are wide (avatar + truncated name +
+  status badge), so the implicit track sized to max-content. `min-w-0` on both items lets
+  the track shrink and the `truncate` children do their job. Only visible with the issue
+  ticket open, which is why the first overflow probe found nothing — **measure the state
+  the user was actually in.**
+- **The desk tab labels overflowed too.** `"Active loans"` in a `w-fit` `inline-flex`
+  trigger row pushed the page 36px wide. The section heading already says "Loans", so the
+  word was redundant as well as too long; now `"Active"`, which fits at 360px too.
+- **"Issue a book" silently did nothing.** The deep link carries `?memberId=<ObjectId>`,
+  and the desk looked the member up with `membersApi.lookup` — which searches **name,
+  email and membership ID**, not `_id`. An ObjectId matches none of them, so the lookup
+  returned an empty list and the desk arrived with nobody selected and no error. The fix
+  was to **fetch the record** with `membersApi.get`. `lookup` and `get` have confusingly
+  similar names and different semantics, which is what invited the mistake.
+- **A generated book cover rendered clipped words at small sizes.** `GeneratedCover` always
+  used `p-4` and body-size type, so at 56px — about 24px of content — "Structure and
+  Interpretation of Computer Programs" became "Str / and / Har" over three lines. At 32px
+  the same component left *no* room and the text was invisibly clipped, which is why the
+  row covers looked fine and only the issue-ticket cover looked broken. Below 72px the
+  fallback now drops the type entirely and renders a flat category tint, which is the
+  honest result at that size.
+
+### The replica set is now a replica set
+The local `mongod` was a standalone, so no transaction could commit and the circulation
+engine was untestable. Resolved by:
+1. appending `replication: { replSetName: rs0 }` to
+   `C:\Program Files\MongoDB\Server\8.0\bin\mongod.cfg` — **backed up first, and
+   auto-restored if `mongod` did not come back up**, because a malformed config would
+   otherwise leave the developer with no database at all;
+2. `Restart-Service MongoDB`;
+3. `rs.initiate()` via the project's own `mongodb` driver — deliberately **not** elevated,
+   keeping the privileged surface to a config edit and a restart.
+
+Verified: `setName: rs0`, primary elected, and a transaction commits.
+
+### Verified live after the fixes
+- **Circulation round trip, 31 checks** — issue decrements `availableCopies` by exactly 1
+  and increments `borrowCount`; due date is `today + loanPeriodDays`; duplicate issue is
+  refused with the right sentence; renew extends by exactly `renewalExtensionDays` and
+  increments `renewCount`; the renewal **limit** is enforced and the message names it;
+  return restores the copy and sets `returnedAt`; a second return is refused; all four tabs
+  return 200.
+- **Authorisation, 17 checks** — a member gets **403** on `GET /api/loans`,
+  `POST /api/loans/issue`, `POST .../return` and `GET /api/team`; `GET /api/loans/mine` is
+  200 and shows only their own rows; **a member renewing another member's loan is 403** with
+  "You can only renew your own loans", and the same member renewing **their own** loan is
+  200, so the 403 is not just "renew is broken".
+  - The first version of this check **passed for the wrong reason**: it issued the loan *to*
+    the probing member and then asserted they could not renew it. Issuing to someone and
+    refusing their renewal is a test that proves nothing.
+- **Browser, 13 checks** — desk renders with loan rows; no failed requests; the ticket's
+  checklist shows all five rows with the fine check honestly `unknown`; **no horizontal
+  overflow at 390px or 768px**; the member record carries the "Issue a book" link and the
+  desk arrives with the member preselected; **0 console errors, 0 page errors**.
 
 ### Unit 12 — deliberately not done
-- **No browser verification.** `tsc`, `eslint` and `next build` are clean and all three
-  routes are present, but the issue/return/renew buttons cannot be exercised until the dev
-  database is a replica set. The **read** paths (loan list, policy, member lookup, book
-  search) do work today and are worth a look.
-- **Policy check parity is client-preview only.** The issue ticket checks four of the five
-  rules client-side; the fine check is `unknown` on purpose.
-- `renewalExtensionDays` was added to the public settings subset for the optimistic preview.
-  It is arguably a display value a member should see anyway ("each renewal adds 7 days"),
-  which is why it belongs there rather than only being read from the server response.
+- `createFineIfLate` is still a Unit 11 stub, so a late return raises **no fine**. The desk's
+  Return dialog previews one from the policy and says so honestly, but the real document is
+  Unit 13's job. `promoteReservationQueue` and `fulfilReadyReservationIfAny` are likewise
+  no-ops (Unit 14), so a returned copy is not yet offered to the member waiting for it.
+- The policy checklist checks four of five rules client-side; the fine check is `unknown`.
+- **The local database change is not in git.** `mongod.cfg` lives outside the repo, so a
+  fresh clone on another machine is standalone again and circulation will 500 there. It is
+  recorded in this tracker and should go into the README's setup steps before Unit 21.
 
 ### Unit 09 — Public Catalog & Book Detail ✅
 - `src/app/(public)/layout.tsx` — a public shell deliberately **not** `AppShell`: a visitor
@@ -1003,17 +1057,16 @@ hard-coded.
   - `unpaid → paid | waived` are terminal; neither may transition again.
   - `fineBlockThreshold` is deliberately **not** in the public settings subset, so the
     client cannot pre-judge whether a member is blocked. The server says so.
-- **Open decision for the developer, still unanswered: convert the local `mongod` to a
-  single-node replica set?** It requires restarting their database service. Until then
-  Units 11–14 can be built but not exercised.
+  - Circulation is now testable, so this unit **can** be verified end to end.
 
 ## Open Questions
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
 - Default currency (default USD, editable in Settings).
-- `CLOUDINARY_*` must be real credentials in `.env.local` for the live upload round trip. `MONGODB_URI`
-  already points at a running **local** MongoDB, so every non-transactional unit can now be verified against
-  a real database (Unit 07 was). **Transactions still need a replica set** — circulation (issue / return /
-  reserve-promote) will not work against the current standalone instance.
+- `MONGODB_URI` already points at a running **local** MongoDB, now converted to a
+  single-node replica set (`rs0`) so circulation transactions commit. **`mongod.cfg` lives
+  outside the repo**, so another machine is standalone again and circulation will 500 there —
+  the setup steps must go in the README before Unit 21. Every non-transactional unit was
+  verified against a real database; Units 11 and 12 are verified too.
 - Confirmed against the spec: **suspended members may still edit their profile and avatar.**
   `architecture.md` §Auth & Access Model says "Wishlist and profile edits remain allowed", and
   `requireActiveMember()` is reserved for reserve / renew / issue. `PATCH /api/profile` therefore uses
@@ -1188,9 +1241,41 @@ hard-coded.
 - **A browser stack trace for a 500 points at the request, not the bug.** The real cause was
   only in the dev server's own log. Read `.next/dev/logs/next-development.log` before
   theorising — it has the actual exception while the console only has `INTERNAL`.
-- **Two unrelated failures arriving in one bug report are two bugs.** "The tabs are broken
-  and I can't issue" turned out to be a missing `await` *and* a replica-set refusal, with
-  nothing in common. Split the report before investigating.
+- **A grid item defaults to `min-width: auto`, so it will not shrink below its content.**
+  A wide child inside a grid cell sizes the implicit track to max-content and pushes the
+  whole page into a horizontal scroll — 36px past a 390px viewport here, with the row and
+  card layouts both looking fine. `min-w-0` on the item lets the track shrink and the
+  `truncate` children do their job. **Measure the state the user was actually in**: the
+  overflow only appeared once the issue ticket was open, and a probe on the plain page
+  found nothing.
+- **`w-fit` cannot wrap.** Four tab triggers in an `inline-flex w-fit` list overflow a narrow
+  viewport rather than reflowing. Shorten the labels: a redundant word in a tab is both too
+  long *and* duplicated from the section heading.
+- **Check what a search endpoint actually searches.** "Look up this member" was implemented
+  as `membersApi.lookup(ObjectId)` against an endpoint that matches **name, email and
+  membership ID** — so it returned an empty list, the deep link silently did nothing, and
+  there was no error to notice. `lookup` and `get` are confusingly similar names for
+  different semantics.
+- **A component that renders text must respond to its own size.** `GeneratedCover` hard-coded
+  `p-4` and body-size type, so below ~72px it produced "Str / and / Har". At 32px it left no
+  room and clipped invisibly — so the *same* component looked fine in a table and broken in a
+  ticket. Below the threshold, render the flat tint and let the adjacent title carry the text.
+- **Assert on the message, not the status code.** The duplicate-issue 400 was already correct
+  but carried the wrong explanation, because availability was checked before the duplicate
+  rule. Status-code assertions cannot see a *wrong reason*; a status code of 400 for a
+  different cause still passes.
+- **Check the specific rule before the general one.** Both refusals were true, but "you
+  already have this on loan" is the one naming the mistake, and it is also the cheaper query.
+- **A test that issues a record to the actor and then asserts the actor cannot act on it
+  proves nothing.** The first authorisation check for renewals did exactly that and passed
+  for the wrong reason. Assign to a *third* party.
+- **Changing an infrastructure service needs a backup and a self-rollback.** The elevated
+  script that edited `mongod.cfg` copied it first and restored it if `mongod` did not come
+  back up. A malformed config would otherwise have left the developer with no database, and
+  "the fix was a one-line edit" is exactly the kind of statement that hides that risk.
+- **Keep the privileged surface minimal.** The config edit and service restart needed
+  elevation; `rs.initiate()` did not, so it ran unelevated from the project's own
+  `mongodb` driver. Fewer elevated steps, less to go wrong, easier to explain.
 - **Prove the sparse-index rule instead of asserting it.** Two documents with `membershipId: null`
   fail with duplicate-key `E11000` on `membershipId: 1`. An API response of
   `membershipId: null` is the `?? null` *read* fallback and is not evidence about storage —
