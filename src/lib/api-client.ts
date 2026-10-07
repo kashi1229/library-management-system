@@ -1,7 +1,7 @@
 import type { NextResponse } from "next/server";
 import type { ApiFailure, ApiSuccess } from "@/lib/api";
 import type { FieldErrors } from "@/lib/api";
-import type { BookSort, BookAvailability, CategoryColor, UserStatus } from "@/lib/constants";
+import type { BookSort, BookAvailability, CategoryColor, StaffRole, UserStatus } from "@/lib/constants";
 import type { CategoryIconName } from "@/lib/validators/category";
 import type { BookStatusFilter, PublicBookSort } from "@/lib/validators/book";
 import type {
@@ -361,12 +361,17 @@ export type MemberListFilters = {
   limit?: number;
 };
 
-export type CreateLibrarianInput = {
+export type CreateStaffMemberInput = {
   name: string;
   email: string;
   /** Must satisfy the shared password policy. */
   password: string;
   phone?: string;
+  /**
+   * Omitted means `librarian`. Only an admin may send `admin` — the service enforces
+   * that independently of this screen.
+   */
+  role?: StaffRole;
 };
 
 /**
@@ -413,7 +418,8 @@ export const teamApi = {
   list: (signal?: AbortSignal) =>
     request<{ items: TeamMember[] }>("/team", { signal }).then((d) => d.items),
 
-  create: (input: CreateLibrarianInput) =>
+  /** Create a librarian, or an administrator when `role` says so. */
+  create: (input: CreateStaffMemberInput) =>
     request<{ member: TeamMember }>("/team", { method: "POST", body: input }).then((d) => d.member),
 
   /** Name and/or status. `role` is deliberately not accepted. */

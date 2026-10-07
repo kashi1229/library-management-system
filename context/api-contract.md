@@ -87,8 +87,8 @@ Notes added in Units 08–09:
 | POST | /members/:id/activate | S | |
 | POST | /members/:id/reset-password | S for members, A for librarians | Returns temporary password once |
 | GET | /team | A | List librarians/admins |
-| POST | /team | A | Create librarian |
-| PATCH | /team/:id | A | Update name/status (cannot demote/disable self) |
+| POST | /team | A | Create a staff account. Body `{ name, email, password, phone?, role? }`; `role` defaults to `librarian`, and only an admin may send `admin` |
+| PATCH | /team/:id | A | Update name/status. `role` is rejected, so a librarian cannot be promoted — create an administrator instead |
 
 ## Circulation
 | GET | /loans | S | Filters: `status(active|returned|overdue|due_soon), memberId, bookId, from, to, page` |

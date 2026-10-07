@@ -19,7 +19,8 @@ import { PageHeader } from "@/components/common/page-header";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusBadge } from "@/components/common/status-badge";
 import { formatDate, initials } from "@/lib/utils";
-import { AddLibrarianDialog } from "@/components/features/team/add-librarian-dialog";
+import { AddStaffDialog } from "@/components/features/team/add-staff-dialog";
+import { RenameTeamMemberDialog } from "@/components/features/team/rename-team-member-dialog";
 import { teamApi, type TeamMember } from "@/lib/api-client";
 
 /**
@@ -36,6 +37,7 @@ import { teamApi, type TeamMember } from "@/lib/api-client";
  */
 export function TeamManager({ currentUserId }: { currentUserId: string }) {
   const [adding, setAdding] = React.useState(false);
+  const [renaming, setRenaming] = React.useState<TeamMember | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
   // Keyed on the pathname, like every other manager in the app. There is no filter to
@@ -66,31 +68,6 @@ export function TeamManager({ currentUserId }: { currentUserId: string }) {
     }
   };
 
-  const rename = async (member: TeamMember) => {
-    // A prompt is not a form, but renaming is rare and the field is a single required
-    // value; a dialog here would be more machinery than the task deserves.
-    const next = window.prompt("New name for this staff account:", member.name);
-    if (next === null) return;
-
-    const trimmed = next.trim();
-    if (trimmed === member.name) return;
-    if (trimmed.length < 2) {
-      toast.error("Name must be at least 2 characters");
-      return;
-    }
-
-    setBusyId(member.id);
-    try {
-      await teamApi.update(member.id, { name: trimmed });
-      toast.success("Name updated");
-      void mutate();
-    } catch {
-      toast.error("That name could not be saved", { description: "Please try again." });
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   return (
     <div className="container-page space-y-6">
       <PageHeader
@@ -99,7 +76,7 @@ export function TeamManager({ currentUserId }: { currentUserId: string }) {
         action={
           <Button onClick={() => setAdding(true)}>
             <UserPlus className="size-4" aria-hidden="true" />
-            Add librarian
+            Add staff
           </Button>
         }
       />
@@ -131,11 +108,11 @@ export function TeamManager({ currentUserId }: { currentUserId: string }) {
           <EmptyState
             icon={Users}
             title="No staff accounts"
-            description="Add a librarian to give someone access to the catalog and circulation desk."
+            description="Add a librarian to run the catalog and circulation desk, or an administrator who can also manage staff and settings."
             action={
               <Button onClick={() => setAdding(true)}>
                 <UserPlus className="size-4" aria-hidden="true" />
-                Add librarian
+                Add staff
               </Button>
             }
           />
@@ -205,7 +182,7 @@ export function TeamManager({ currentUserId }: { currentUserId: string }) {
                     </DropdownMenuTrigger>
 
                     <DropdownMenuContent align="end" className="min-w-52">
-                      <DropdownMenuItem onSelect={() => void rename(member)}>
+                      <DropdownMenuItem onSelect={() => setRenaming(member)}>
                         Rename account
                       </DropdownMenuItem>
 
@@ -250,10 +227,19 @@ export function TeamManager({ currentUserId }: { currentUserId: string }) {
         Passwords are never emailed. Use the team member&rsquo;s own record to reset one.
       </p>
 
-      <AddLibrarianDialog
+      <AddStaffDialog
         open={adding}
         onOpenChange={setAdding}
         onCreated={() => void mutate()}
+      />
+
+      <RenameTeamMemberDialog
+        open={renaming !== null}
+        onOpenChange={(next) => {
+          if (!next) setRenaming(null);
+        }}
+        member={renaming}
+        onRenamed={() => void mutate()}
       />
     </div>
   );

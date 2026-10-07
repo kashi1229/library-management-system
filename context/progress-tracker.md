@@ -58,8 +58,10 @@ Update this file after every meaningful implementation change.
   `StatCard`s) + `MemberTabs` (Overview, Loans, Fines and Reservations all render **real
   rows** from the record — see the fix below; the first version shipped them as
   "arrives with the circulation work" placeholders, which was wrong).
-  `/staff/team`: `TeamManager` + `AddLibrarianDialog` (generates the password, validate as you
-  type, one scrolling region with a pinned footer per the Unit 07 rule).
+  `/staff/team`: `TeamManager` + `AddStaffDialog` (**role-aware**: librarian or administrator,
+  chosen in the dialog; password generated up front so a mistyped email is caught before the
+  account exists) + `RenameTeamMemberDialog` + `RolePicker`, all with one scroll region and a
+  pinned footer per the Unit 07 rule.
 - `src/hooks/use-member-filters.ts` follows Unit 08's **focus-owns-the-value** rule and the
   per-kind history rule rather than rediscovering them.
 - **The detail page needs no serialisation step**: `getMemberDetail` reads `.lean()` and maps
@@ -693,6 +695,98 @@ Both reported after the unit was committed, and both passed `tsc`, `eslint` and 
     the developer, so the reveal is verified by construction and by the reported symptom being
     explained end to end — not by watching it render. Worth one manual click through at Unit 21.
 
+### Unit 10 — upgraded after the developer's feedback
+Two pieces of the team screen were placeholders rather than features. Both are now real.
+
+**Renaming a staff account was a `window.prompt`.**
+- One line of `window.prompt("New name for this staff account:", member.name)` guarded by a
+  length check. It looked like a browser dialog *inside* the app, so it broke the theme at
+  exactly the moment an admin was editing staff; it had no field-level validation, only a
+  toast after the fact; it had no discard guard, so Escape threw the text away silently; and
+  it asked for a name without showing whose name, or reminding the admin that the name is what
+  appears in the sidebar and the audit trail.
+- Replaced by `RenameTeamMemberDialog`, following the `CategoryDialog` pattern line for line
+  because that one was already fixed for three separate Unit 07 bugs:
+  live identity preview (the avatar's derived initials update as you type, which is cheaper
+  than explaining the initials rule), a **pinned discard row** rather than a second modal,
+  `requestClose()` on every close path, Save disabled until dirty, one scroll region with a
+  pinned footer, and the email and role shown as **read-only facts with the reason** — because
+  "why can't I change the email here?" is the obvious next question when renaming someone.
+- **The name rule is now one schema.** `staffNameSchema` is composed into
+  `createStaffMemberSchema`, `updateTeamMemberSchema` and `renameTeamMemberSchema`. Three
+  copies of `min(2).max(80)` is three places for the limit to drift, and drift there means the
+  form accepts a name the API rejects with a generic 500 — the Unit 08 model-cap mismatch again.
+- `renameTeamMemberSchema` is a plain object, **not** `updateTeamMemberSchema` reused: that one
+  carries a `.refine()` requiring *a name or a status*, which is right for a PATCH and
+  meaningless for a form whose only field is the name.
+
+**There was no way to create an administrator.** Only `createLibrarian`, with the role
+hard-coded.
+- `POST /api/team` now takes an optional `role` and `createStaffMember` honours it.
+  **`role` defaults to `librarian`**, so a caller that forgets the key cannot mint an admin by
+  accident; creating one has to be deliberate.
+- **Only an admin may create an admin**, checked in the service as well as the route. Minting
+  an administrator is the one action on this screen that hands over the ability to change
+  library settings and disable other staff, so it does not rely on a single caller.
+- **Role is still not editable.** `updateTeamMemberSchema` rejects `role`, so promotion and
+  demotion both remain impossible by design; the supported route to gaining an administrator
+  is creating one, which writes an audit entry naming the actor who authorised it. The
+  last-admin refusal message was corrected from "Promote another librarian to admin" — advice
+  the app offers no way to follow — to "Add another administrator".
+- **One "Add staff" dialog with an explicit role choice, not a second header button.** Two entry
+  points to one form is two places for the copy to drift, and it would make granting full
+  authority feel like a routine click. Picking the role inside the dialog puts the capability
+  difference in front of the person deciding, and the privileged choice shows a warning
+  stating that the account can disable other staff *including yours*.
+- `RolePicker` uses **native `<input type="radio">`** inside a `<label>`, not a grid of styled
+  buttons. The browser already implements everything an ARIA radiogroup promises: one tab stop,
+  arrow keys, correct accessibility tree. `useRovingRadio` exists for *button* grids that have
+  to supply that behaviour themselves, and pairing it with real radios would handle every
+  arrow keypress twice with the two implementations disagreeing about what is selected.
+  Selected and focused states are drawn with `has-[:checked]` / `has-[:focus-visible]` on the
+  label, so they follow the real input instead of duplicated state that could disagree with it.
+  Each card lists its **capabilities** ("can manage books…") rather than denials, because a
+  list of absent power does not help someone deciding.
+- Create-dialog Save tracks `isValid`, not `isDirty`: there is no persisted record to differ
+  from, and the pre-filled generated password would otherwise make the form permanently dirty.
+- **`TEAM_ROLES` was deleted from the validator.** `lib/constants.ts` already exported
+  `STAFF_ROLES` for exactly this, so the validator had a second name for the same array —
+  the duplication rule from the Unit 08 payload drift, waiting to happen. Worth noting it was
+  also declared *below* the schemas, so any schema referencing it above would have been a
+  temporal-dead-zone crash on the first import from a route.
+
+**Verified live against the local MongoDB** (25 checks, all passing):
+- omitted `role` → `librarian`; `role: "admin"` → `admin`; `role: "member"` → 422
+- a newly created administrator **signs in** with the supplied password and comes back with
+  role `admin`; a librarian likewise signs in as `librarian`
+- a librarian calling `POST /api/team` gets **403**, and `GET /api/team` gets 403
+- duplicate email → 409 naming the `email` field; weak password → 422
+- `team.create` is audited for both roles, the entry records the role, and the entry contains
+  no password material
+- **the sparse-index rule was proved, not assumed**: two documents written with
+  `membershipId: null` fail with duplicate-key `E11000` on `membershipId: 1`, while the staff
+  documents the service actually writes omit the key and both insert fine. The API reports
+  `membershipId: null` on read because of the `?? null` projection, which is a *read* fallback
+  and not evidence that `null` was stored.
+- rename verified separately: 22 API checks and 35 browser checks (dialog opens, live preview
+  tracks typing, inline validation, discard guard, Save reachable at 1024x640 and 390x844, real
+  save persists), 0 page errors, 0 console errors.
+
+### Unit 10 — harness lessons worth keeping
+- **`click({ clickCount: 3 })` does not select an input's text in headless Chrome.** Typing
+  appended instead of replacing, which renamed a real admin to `"Athenaeum AdmihgAda LovAelace"`
+  and cascaded into four false failures that all looked like product bugs. Ctrl+A + Backspace +
+  type then ate the first two characters and dropped the tail (`"Athenaeum Admihg"` → `"henaeum
+  Admihg"`). **Set the value through `HTMLInputElement.prototype`'s native setter and dispatch
+  one `input` event** — what testing libraries do, and deterministic.
+- **A harness that renames real data must restore it in a `finally`, and must print before and
+  after.** Two runs left the database dirty before that was added.
+- **Assert on a specific node, not on a page's `textContent`.** `/\bAL\b/` failed to match
+  because the initials are glued to their neighbours in the concatenated string; reading
+  `[data-slot="avatar-fallback"]` was both specific and correct.
+- A failing **screenshot write** (`UNKNOWN: unknown error, open …png`) is the harness, not the
+  page. The developer had already confirmed the feature worked before that run.
+
 ### Unit 10 — deliberately not done
 - **The reset-password reveal still needs one manual click-through.** Everything else in this
   unit was checked live; that one was fixed by construction and confirmed by the reported
@@ -832,6 +926,43 @@ Both reported after the unit was committed, and both passed `tsc`, `eslint` and 
   out on time has no filter but does have a display state.
 - **A capped list must say it is capped.** Returning the newest 50 rows beside an exact total and
   rendering no note reads as "this is everything". Compare the row count against the limit.
+- **A vertical action footer stacks on mobile.** `DialogFooter` is `flex-col-reverse
+  sm:flex-row`, so `me-auto` (copied from `CategoryDialog`) applies to the *column* axis below
+  `sm` and strands a narrow Cancel at the bottom-left instead of a full-width one. Use
+  `sm:me-auto` plus `w-full sm:w-auto` on both buttons. **`CategoryDialog` still has the original
+  `me-auto` and the same mobile flaw** — not fixed here to keep this commit to the rename flow,
+  and worth a one-word pass at Unit 21.
+- **`click({ clickCount: 3 })` does not select an input's text in headless Chrome.** Typing
+  appends instead. Set the value through `HTMLInputElement.prototype`'s native setter and dispatch
+  one `input` event — what testing libraries do. A harness that writes real data must also
+  restore it in a `finally`.
+- **Never ship `window.prompt`/`window.confirm` inside the app.** An OS dialog cannot be styled,
+  so it breaks the theme at the moment of use, has no field-level validation, and discards input
+  on Escape without warning. It is a console tool, not a UI.
+- **Never reach for "the obvious next question" as a reason to leave a gap.** The rename dialog
+  shows email and role as read-only facts *with the reason they are fixed*, rather than hiding
+  them and letting the admin wonder. The same reasoning retired "promote another librarian to
+  admin" — advice the app offered no way to follow — in favour of "add another administrator".
+- **Two entry points to one form is a bug.** A single dialog with an explicit choice is better
+  than two buttons that open it: the copy cannot drift apart, and a privileged choice stays a
+  deliberate act instead of becoming a routine click.
+- **Granting authority needs three things**: a default to the safe value, an explicit confirmation
+  of the consequence, and an audit entry naming who authorised it. Default `role` to
+  `librarian`, warn on `admin`, and let only an admin create one.
+- **Prefer a native control when it already implements the accessibility contract.** A native
+  radio group gives one tab stop, arrow keys and a correct tree for free. Reaching for
+  `useRovingRadio` *on top of* native radios handles every arrow keypress twice. That hook is
+  for styled button grids, which is what `color-swatch-picker` and `icon-picker` are.
+- **A `const` referenced by an earlier module-level initialiser is a TDZ crash on import.**
+  `TEAM_ROLES` sat below the schemas in `validators/members.ts`; any schema using it above would
+  have failed the first time a route imported the module. Declare shared constants first.
+- **One name for one list.** `STAFF_ROLES` already existed in `lib/constants.ts`, so the
+  validator's `TEAM_ROLES` was a second name for the same array. Delete the duplicate rather than
+  importing both.
+- **Prove the sparse-index rule instead of asserting it.** Two documents with `membershipId: null`
+  fail with duplicate-key `E11000` on `membershipId: 1`. An API response of
+  `membershipId: null` is the `?? null` *read* fallback and is not evidence about storage — the
+  stored document has to be inspected.
 - **Never unmount a form's only submit button.** A form with no submit button falls into the
   implicit-submission path, where a real mouse click on a `type="button"` inside it submits anyway. Keep the
   submit button mounted and disable it instead of swapping it out. Related: `el.click()` does not
