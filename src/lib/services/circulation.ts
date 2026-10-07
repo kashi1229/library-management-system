@@ -698,7 +698,14 @@ export async function listLoans(query: ListLoansQuery): Promise<{
   meta: PageMeta;
 }> {
   const now = new Date();
-  const filter = buildFilter(query, now);
+  // **`await` is load-bearing.** `buildFilter` is async because the free-text branch has
+  // to await two id lookups. Without this await a `Promise` reaches `find()`, and
+  // Mongoose reports it as:
+  //   ObjectParameterError: Parameter "filter" to find() must be an object,
+  //   got "[object Promise]"
+  // which surfaces as a bare 500 on every loan tab. `tsc` and `eslint` both accept it,
+  // because Mongoose's filter parameter is typed loosely enough to swallow a Promise.
+  const filter = await buildFilter(query, now);
 
   const page = Math.max(1, query.page);
   const limit = Math.min(100, Math.max(1, query.limit));

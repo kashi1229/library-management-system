@@ -395,6 +395,33 @@ tracker before this unit started.
    - `GET /api/members/lookup` and `loansApi.list` already serve the Unit 12 UI; do not
      build second versions.
 
+### Unit 12 — bugs found by the developer using the page
+Reported as "all four tabs are broken and I cannot issue a book". **Two entirely different
+causes**, which is why they arrived in one report.
+
+- **Every loan tab returned 500 — a missing `await`, mine.** `listLoans` called
+  `buildFilter(query, now)` on an **async** function without awaiting it, so a `Promise`
+  reached `Loan.find()`, and Mongoose reported:
+  `ObjectParameterError: Parameter "filter" to find() must be an object, got "[object Promise]"`.
+  `buildFilter` is async because the free-text branch awaits two id lookups; returning an
+  object from it made the `await` look unnecessary. **Neither `tsc` nor `eslint` catches
+  this**, because Mongoose's filter parameter is typed loosely enough to accept a Promise.
+  Confirmed by the running server's own log, not by guessing from the browser stack.
+  Fixed with the `await` and a comment explaining why it is load-bearing.
+  - This is the **fourth** time in this project that the browser stack pointed at the
+    caller and the real cause was only visible server-side. The browser trace for a 500 is
+    almost never the bug; it is the request that triggered it.
+- **Issuing a book fails on the replica-set limit — environmental, not a code defect.**
+  `POST /api/loans/issue -> MongoServerError: Transaction numbers are only allowed on a
+  replica set member or mongos`. This is the blocker flagged twice already, now reached in
+  anger. It is *not* worked around: a non-transactional fallback would quietly break
+  invariant 5, which is the entire reason the mutations are transactional.
+  - **The fix is three lines in `C:\Program Files\MongoDB\Server\8.0\bin\mongod.cfg`**
+    (add `replication: { replSetName: rs0 }`), a Windows service restart, then
+    `rs.initiate()`. Awaiting the developer's go-ahead because it needs admin rights and
+    briefly stops their database.
+  - Until then the desk is fully readable and completely read-only.
+
 ### Unit 12 — deliberately not done
 - **No browser verification.** `tsc`, `eslint` and `next build` are clean and all three
   routes are present, but the issue/return/renew buttons cannot be exercised until the dev
@@ -1151,6 +1178,19 @@ hard-coded.
   changes it in Settings (invariant 7).
 - **Probe the deployment before building on a capability the docs assume.** `db.admin().hello`
   answers whether a replica set exists in one query; finding out by issuing a book is worse.
+- **An `async` helper's return value must be awaited at the call site, and a function that is
+  async only for one branch is a trap.** `buildFilter` returns an object but is `async`
+  because its free-text branch awaits, so `buildFilter(...)` looks like a plain call. The
+  symptom was `Parameter "filter" to find() must be an object, got "[object Promise]"` on
+  every loan tab — and **no type checker catches it**, because Mongoose types the filter
+  parameter loosely. Rule of thumb: if a function is `async`, always `await` it, or do not
+  make it `async`.
+- **A browser stack trace for a 500 points at the request, not the bug.** The real cause was
+  only in the dev server's own log. Read `.next/dev/logs/next-development.log` before
+  theorising — it has the actual exception while the console only has `INTERNAL`.
+- **Two unrelated failures arriving in one bug report are two bugs.** "The tabs are broken
+  and I can't issue" turned out to be a missing `await` *and* a replica-set refusal, with
+  nothing in common. Split the report before investigating.
 - **Prove the sparse-index rule instead of asserting it.** Two documents with `membershipId: null`
   fail with duplicate-key `E11000` on `membershipId: 1`. An API response of
   `membershipId: null` is the `?? null` *read* fallback and is not evidence about storage —
