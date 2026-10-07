@@ -9,9 +9,98 @@ Update this file after every meaningful implementation change.
 
 ## Current Goal
 - Build Units 11 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- Next unit: **11/12 — Circulation** (issue, return, renew, due-soon and overdue queues).
+- **Unit 11 complete; Unit 12 (circulation UI) is next** — the desk screen over the API
+  built here.
 
 ## Completed
+
+### Unit 11 — Circulation Services & API ✅ · `feat/11-circulation`
+- `lib/services/circulation.ts` — `issueLoan`, `returnLoan`, `renewLoan`, `listLoans`,
+  `listMyLoans`, plus the shared `deriveLoanState`, `bookRefs` and `bookRefOr`.
+- **All three mutations run inside `withTransaction`** (invariant 5). Issuing touches the
+  loan collection *and* the book's copy count; without a transaction a failure halfway
+  leaves a loan with no copy removed, or — far worse and invisible until a member asks why
+  they cannot borrow — a copy removed with no loan.
+- **The copy is taken with one conditional update** (`{ availableCopies: { $gt: 0 } }` plus
+  `$inc`), which is what makes two simultaneous issues for the last copy safe: the loser's
+  condition no longer matches and it gets a clear conflict rather than driving the count
+  negative. It deliberately bypasses the document validator, because the filter's guard is
+  the stronger check — Mongo refuses the whole update when the condition fails.
+- **The copy is restored with an `$expr` guard** comparing `availableCopies` to
+  `totalCopies` *inside the update filter*. A `$lt` cannot compare two fields of one
+  document, and checking in application code would reopen the race invariant 5 exists to
+  close. If the guard fails the transaction aborts, so `availableCopies` can never exceed
+  `totalCopies`.
+- **Every policy number comes from `getSettings()`** at request time (invariant 7). There
+  is deliberately no `maxActiveLoans` or `loanPeriodDays` constant in the file, and
+  `lib/validators/loan.ts` validates *shape only* — a `zod` `.max(5)` would freeze the
+  policy into the validator and silently disagree with an admin who changes it in Settings.
+- **Every refusal is a sentence a member can act on**, and the policy limit is quoted in
+  the message: *"shumail already has 5 books on loan. The limit is 5."* Policy refusals
+  carry a **field** error where one applies (`memberId`, `bookId`) so a form can put the
+  message beside the input instead of in a banner.
+- **Availability subtracts holds.** `availableCopies - readyHoldsForOtherMembers`, reusing
+  the `getReadyHoldCounts` already exported from `services/books.ts`. The member's *own*
+  ready hold is excluded, because issuing is how they collect it — and that hold is
+  consumed through `fulfilReadyReservationIfAny` rather than left dangling.
+- `lib/services/hooks.ts` — the stub contract the spec asked for, naming each seam and its
+  owning unit: `createFineIfLate` (13), `promoteReservationQueue` (14),
+  `fulfilReadyReservationIfAny` (14). All take the open `session`, because a hook that
+  opened its own connection would write **outside** the transaction.
+- **`countOtherReservations` is implemented for real, not stubbed.** The spec calls it a
+  stub, but a stub returning `0` would let a renewal through on exactly the book other
+  members are queuing for, silently breaking business rule 3. A stub is only safe when its
+  "no data" answer is the permissive one; here the permissive answer is the wrong one, and
+  the `Reservation` collection plus its indexes have existed since Unit 02. What Unit 14
+  owns is the *queue* — promotion, expiry, cancellation — not this existence check. The
+  member's own hold is excluded, or a member who reserved and then collected could never
+  renew.
+- `deriveLoanState` is **the single definition** of `on_time | due_soon | overdue |
+  returned`. `services/members.ts` now imports it, and `deriveLoanState` returns
+  `daysLeft` as well as `daysOverdue`.
+  - **The rule changed while moving, deliberately.** It now counts **calendar** days
+    (date-fns `differenceInCalendarDays`, invariant 12) instead of whole 24-hour blocks. A
+    book due at 23:00 yesterday and returned at 01:00 today is **one** day late; the old
+    24h arithmetic charged nothing for a book that crossed midnight, and the fine — which
+    is `daysOverdue × ratePerDay` — would have followed that wrong number. The `overdue` and
+    `due_soon` **list filters** use `startOfDay`/`endOfDay` to match, so a loan can never be
+    listed under "overdue" while its badge says 0 days.
+- `MemberBookRef` is now `LoanBookRef` and `MemberLoan` is `Omit<LoanSummary, "member">`,
+  so one row shape serves the desk and the member record and cannot drift (the Unit 08
+  payload lesson). Carrying `slug` also let the member record link straight to
+  `/catalog/[slug]` instead of the search-query workaround it previously needed.
+- Routes: `GET /api/loans`, `GET /api/loans/mine`, `POST /api/loans/issue`,
+  `POST /api/loans/:id/return`, `POST /api/loans/:id/renew`. `/mine` takes **no member id**
+  — it comes from the session, so the URL cannot be edited to read someone else's loans.
+  Renew is the one non-staff mutation, because renewing your own book is a member
+  capability; the ownership check lives in the service, so no caller can skip it.
+- `loansApi` added to `lib/api-client.ts`, with the fetcher taking **no positional
+  parameters** — the SWR rule that has bitten this codebase twice.
+- Verified: `tsc`, `eslint` and `next build` clean, all 5 routes present.
+
+### Unit 11 — BLOCKED at runtime locally: the dev database is not a replica set
+**The circulation engine cannot run against the current local `mongod`.** Probed directly:
+
+```
+setName:  (none — standalone)
+transaction commit: FAILS -> IllegalOperation: Transaction numbers are only allowed on a
+                                   replica set member or mongos
+```
+
+`architecture.md` states Atlas provides a replica set on every tier and that issue/return
+run in a transaction (invariant 5), so **the code is correct for the documented production
+topology**. This is a dev-environment gap, not a code defect, and it was flagged in the
+tracker before this unit started.
+
+- Every `issueLoan` / `returnLoan` / `renewLoan` will currently return a generic 500
+  locally. `handler()` maps the driver error to `INTERNAL`.
+- **Not worked around.** A fallback that runs these writes without a transaction would
+  quietly break the exact invariant the unit exists to enforce, and would produce a rare
+  "why can I not borrow this" bug that is far more expensive than the current loud 500.
+- **Fix is environmental**: restart the local `mongod` with `--replSet rs0` and run
+  `rs.initiate()`, or point `MONGODB_URI` at Atlas. Awaiting the developer's decision — it
+  means restarting a database service on their machine.
+- The read routes (`GET /api/loans`, `GET /api/loans/mine`) are unaffected and work today.
 
 ### Unit 10 — Members & Team Management ✅ · `feat/10-members-team`
 - `lib/validators/members.ts` — `listMembersQuerySchema`, `lookupQuerySchema`,
@@ -229,12 +318,16 @@ Update this file after every meaningful implementation change.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **11/12** Circulation → **13** Fines → **14** Reservations →
+1. **12** Circulation UI → **13** Fines → **14** Reservations →
    **15** Wishlist & Reviews → **16** Notifications → **17** Dashboards →
    **18** Reports & Audit → **19** Settings → **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
-   - **Unit 11/12 needs a Mongo replica set.** Issue, return and reserve-promote run in
-     transactions, and the current local instance is standalone. This is the first unit that
-     cannot be verified until `MONGODB_URI` points at a replica set.
+   - **Unit 12 is blocked on the dev database being a replica set.** The desk screen issues,
+     returns and renews, so every button needs the mutations to work. Decide that first —
+     see "Unit 11 — BLOCKED at runtime locally" above.
+   - `GET /api/members/lookup` (Unit 10) and `membersApi.lookup` are already the member
+     type-ahead the issue form needs. Do not build a second lookup.
+   - `loansApi.list` gives the desk its filterable table; `deriveLoanState` already puts
+     `view`, `daysLeft` and `daysOverdue` on every row, so no client-side date arithmetic.
 
 ### Unit 09 — Public Catalog & Book Detail ✅
 - `src/app/(public)/layout.tsx` — a public shell deliberately **not** `AppShell`: a visitor
@@ -798,19 +891,20 @@ hard-coded.
   rather than showing a button that does nothing.
 
 ## In Progress
-- Unit 11/12 — Circulation. Not started. Needs `GET /api/loans` with `status`, `memberId`,
-  `bookId`, `from`, `to`, `page`; `POST /api/loans/issue`; `POST /api/loans/:id/return`;
-  `POST /api/loans/:id/renew`; and the desk UI with member lookup, availability re-check and
-  the due-soon / overdue queues.
-  - **`lookupMembers` from Unit 10 is already built for this** — the `GET /api/members/lookup`
-    type-ahead returns up to 8 lightweight rows with active-loan counts, which is exactly what
-    an issue form needs. Do not build a second lookup.
-  - All three mutations run in `withTransaction()`, so they need a **replica set**. The
-    local `MONGODB_URI` is standalone and will reject them.
-  - Copy arithmetic must be the **delta** approach Unit 08 established, and
-    `availableCopies <= totalCopies` is guarded by a model pre-validate hook.
-  - Renewals are bounded by `maxRenewals` and extended by `renewalExtensionDays`; both come
-    from the settings singleton, never from a constant (invariant 7).
+- Unit 12 — Circulation UI. Not started. The API from Unit 11 is in place; this is the desk
+  screen over it: a two-pane issue form (member type-ahead via `membersApi.lookup`, book by
+  id/slug/title), the active-loans table with `on_time / due_soon / overdue` chips and
+  one-click return/renew, and the due-soon and overdue queues.
+  - `use-loan-filters.ts` should follow `use-member-filters.ts`: URL is the source of truth,
+    discrete filters `push`, the debounced search `replace`s, focus-owns-the-value.
+  - **The SWR fetcher must take no positional parameters.** That bug cost Unit 08 and
+    Unit 09 a full unit each, and an HTTP status check cannot see it — the page returns 200
+    with a correct-looking shell while nothing loads.
+  - Member row actions can link into the desk (`/staff/circulation?memberId=…`), which is
+    the Unit 10 detail page's "issue a book" quick action from F6.
+- **Open decision for the developer: convert the local `mongod` to a single-node replica
+  set?** It requires restarting their database service. Until then Unit 12 cannot be
+  exercised in the browser, only built.
 
 ## Open Questions
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
@@ -959,10 +1053,36 @@ hard-coded.
 - **One name for one list.** `STAFF_ROLES` already existed in `lib/constants.ts`, so the
   validator's `TEAM_ROLES` was a second name for the same array. Delete the duplicate rather than
   importing both.
+- **A conditional update, not a read-then-write, is what makes a count safe.** Issuing a
+  book takes a copy with `{ availableCopies: { $gt: 0 } }` + `$inc`, so two simultaneous
+  requests for the last copy cannot both succeed. Returning a copy uses
+  `{ $expr: { $lt: ["$availableCopies", "$totalCopies"] } }` + `$inc`, because **a `$lt`
+  cannot compare two fields of the same document** and checking in application code reopens
+  the race. Both deliberately bypass document validators; the filter guard is stronger,
+  since Mongo refuses the whole update when the condition fails.
+- **A stub is only safe when its "no data" answer is the permissive one.** `countOtherReservations`
+  was specced as a stub, but `0` would have let renewals through on books other members are
+  queuing for. Check what a stub *permits*, not just what it returns.
+- **Count calendar days, not 24-hour periods, wherever money depends on it.** A book due at
+  23:00 yesterday and returned at 01:00 today is one day late. Whole 24h blocks charged
+  nothing for it, and `daysOverdue × ratePerDay` followed the wrong number.
+- **Hooks called inside a transaction must take the `session`.** A stub that opened its own
+  connection would write outside the transaction, which is the failure the transaction
+  exists to prevent.
+- **Never add a "no transactions available" fallback for multi-document writes.** It would
+  quietly break the invariant the code exists to enforce and produce a rare data bug that
+  is far more expensive than a loud 500. Fix the environment instead.
+- **A validator may check shape but never policy.** A `zod` `.max(5)` on an active-loan
+  count freezes the policy into the transport layer and silently disagrees with an admin who
+  changes it in Settings (invariant 7).
+- **Probe the deployment before building on a capability the docs assume.** `db.admin().hello`
+  answers whether a replica set exists in one query; finding out by issuing a book is worse.
 - **Prove the sparse-index rule instead of asserting it.** Two documents with `membershipId: null`
   fail with duplicate-key `E11000` on `membershipId: 1`. An API response of
-  `membershipId: null` is the `?? null` *read* fallback and is not evidence about storage — the
-  stored document has to be inspected.
+  `membershipId: null` is the `?? null` *read* fallback and is not evidence about storage —
+  the stored document has to be inspected.
+- **`export type { X } from "@/types"` does not bring `X` into local scope.** A file that
+  both re-exports and uses a type needs the separate `import type` as well.
 - **Never unmount a form's only submit button.** A form with no submit button falls into the
   implicit-submission path, where a real mouse click on a `type="button"` inside it submits anyway. Keep the
   submit button mounted and disable it instead of swapping it out. Related: `el.click()` does not

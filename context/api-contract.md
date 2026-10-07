@@ -91,11 +91,14 @@ Notes added in Units 08–09:
 | PATCH | /team/:id | A | Update name/status. `role` is rejected, so a librarian cannot be promoted — create an administrator instead |
 
 ## Circulation
-| GET | /loans | S | Filters: `status(active|returned|overdue|due_soon), memberId, bookId, from, to, page` |
-| GET | /loans/mine | M | Own loans, filter `status` |
-| POST | /loans/issue | S | `{ memberId, bookId, notes? }` |
-| POST | /loans/:id/return | S | Returns loan + fine (if any) |
-| POST | /loans/:id/renew | M (own) / S | |
+| GET | /loans | S | Filters: `q, status(active|returned|overdue|due_soon), memberId, bookId, from, to, page, limit`. `status` is the **derived** view and is optional, so no filter means all loans |
+| GET | /loans/mine | M | Own loans, filter `status`. No member id is accepted — it comes from the session |
+| POST | /loans/issue | S | `{ memberId, bookId, notes? }`. `bookId` accepts an id **or** a slug. 201. Every policy refusal is a 400 `RULE_VIOLATION` naming the rule and, where it helps, the field |
+| POST | /loans/:id/return | S | Returns the loan plus `fine` (or `null` when on time). A second return is a 400 |
+| POST | /loans/:id/renew | M (own) / S | Extends by `renewalExtensionDays`. A member renewing someone else's loan is a 403 |
+
+All three mutations run in a Mongo transaction, so they need a **replica set** (Atlas
+provides one; a standalone local `mongod` does not — see the progress tracker).
 
 ## Reservations
 | GET | /reservations/mine | M | |

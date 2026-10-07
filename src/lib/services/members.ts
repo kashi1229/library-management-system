@@ -1,27 +1,24 @@
 import "server-only";
 import { Types } from "mongoose";
 import { AppError } from "@/lib/api";
-import { Book, Fine, Loan, Reservation, User } from "@/models";
+import { Fine, Loan, Reservation, User } from "@/models";
 import { logAudit } from "@/lib/services/audit";
 import { notify } from "@/lib/services/notifications";
 import { generateTempPassword, hashPassword } from "@/lib/auth/password";
 import {
   ACTIVE_RESERVATION_STATUSES,
-  DUE_SOON_DAYS,
   MEMBER_HISTORY_LIMIT,
   type FineStatus,
   type LoanStatus,
   type ReservationStatus,
   type Role,
 } from "@/lib/constants";
+import { bookRefOr as refFor, bookRefs, deriveLoanState } from "@/lib/services/circulation";
 
 /** Where the notification sends the member when their account status changes. */
 const PROFILE_LINK = "/profile";
 import type {
   Actor,
-  CloudinaryImage,
-  LoanDisplayState,
-  MemberBookRef,
   MemberRecord,
   PublicUser,
 } from "@/types";
@@ -131,79 +128,17 @@ async function activeLoanCounts(memberIds: Types.ObjectId[]): Promise<Map<string
 /* History helpers                                                             */
 /* -------------------------------------------------------------------------- */
 
-const DAY_MS = 86_400_000;
-
-/**
- * Derive a loan's display state and how many days late it is.
+/*
+ * `deriveLoanState`, `bookRefs` and `bookRefOr` used to live in this file and now come
+ * from `services/circulation.ts`. Loans *are* circulation: the loan-state rule and the
+ * "a book shown next to a loan" shape have one owner, so the member record and the
+ * circulation desk cannot drift apart.
  *
- * `overdue` and `due_soon` are **derived and never stored** (invariant 4), so they are
- * computed in exactly one place and handed to the client. Exported because the Unit
- * 11/12 circulation desk renders the same states and must not grow a second copy of
- * this rule.
- *
- * Days are **whole and rounded up**: a book due an hour ago is 1 day late, not 0. The
- * fine is charged per day started, and a "0 days overdue" badge on an overdue loan
- * would be worse than no badge.
+ * The rule also changed with the move, deliberately. It now counts **calendar** days
+ * (date-fns `differenceInCalendarDays`, invariant 12) rather than whole 24-hour blocks,
+ * because the fine is charged from that number and a book that crossed midnight should
+ * cost one day, not zero.
  */
-export function loanView(
-  loan: { status: LoanStatus; dueDate: Date },
-  now: Date,
-): { view: LoanDisplayState; daysOverdue: number } {
-  if (loan.status === "returned") return { view: "returned", daysOverdue: 0 };
-
-  const msLeft = loan.dueDate.getTime() - now.getTime();
-
-  if (msLeft < 0) return { view: "overdue", daysOverdue: Math.ceil(-msLeft / DAY_MS) };
-  if (msLeft <= DUE_SOON_DAYS * DAY_MS) return { view: "due_soon", daysOverdue: 0 };
-  return { view: "on_time", daysOverdue: 0 };
-}
-
-/**
- * Book references for a set of ids, in one query.
- *
- * Every history row needs a title and a cover. This mirrors `categoryMap` in
- * `services/books.ts`: one `$in`, one `Map` keyed by string, so callers never have to
- * think about `ObjectId` equality.
- */
-async function bookRefs(ids: unknown[]): Promise<Map<string, MemberBookRef>> {
-  const refs = new Map<string, MemberBookRef>();
-
-  const unique = [...new Set(ids.map(String))].filter((id) => Types.ObjectId.isValid(id));
-  if (unique.length === 0) return refs;
-
-  const docs = await Book.find({ _id: { $in: unique.map((id) => new Types.ObjectId(id)) } })
-    .select("title authors cover")
-    .lean<Array<Record<string, unknown>>>();
-
-  for (const doc of docs) {
-    refs.set(String(doc._id), {
-      id: String(doc._id),
-      title: String(doc.title),
-      authors: Array.isArray(doc.authors) ? (doc.authors as string[]) : [],
-      cover: (doc.cover as CloudinaryImage | null) ?? null,
-    });
-  }
-
-  return refs;
-}
-
-/**
- * A row's book, or an honest placeholder if the book is gone.
- *
- * Deletion is refused while a book has loan history or an active hold, so this should
- * not happen — but "should not happen" is exactly the assumption that produces a blank
- * row and a support ticket. A named placeholder renders; `undefined` crashes the tab.
- */
-function refFor(refs: Map<string, MemberBookRef>, id: unknown): MemberBookRef {
-  return (
-    refs.get(String(id)) ?? {
-      id: String(id),
-      title: "No longer in the catalog",
-      authors: [],
-      cover: null,
-    }
-  );
-}
 
 /**
  * 1-based FIFO position for each of this member's waiting holds, in two queries total.
@@ -390,7 +325,7 @@ export async function getMemberDetail(id: string): Promise<MemberDetail> {
 
     loans: loans.map((loan) => {
       const dueDate = loan.dueDate as Date;
-      const { view, daysOverdue } = loanView(
+      const { view, daysLeft, daysOverdue } = deriveLoanState(
         { status: loan.status as LoanStatus, dueDate },
         now,
       );
@@ -405,6 +340,8 @@ export async function getMemberDetail(id: string): Promise<MemberDetail> {
         returnedAt: loan.returnedAt ? (loan.returnedAt as Date).toISOString() : null,
         renewCount: Number(loan.renewCount ?? 0),
         fineAmount: Number(loan.fineAmount ?? 0),
+        notes: (loan.notes as string | null) ?? null,
+        daysLeft,
         daysOverdue,
       };
     }),

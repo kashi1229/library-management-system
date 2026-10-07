@@ -1,7 +1,7 @@
 import type { NextResponse } from "next/server";
 import type { ApiFailure, ApiSuccess } from "@/lib/api";
 import type { FieldErrors } from "@/lib/api";
-import type { BookSort, BookAvailability, CategoryColor, StaffRole, UserStatus } from "@/lib/constants";
+import type { BookSort, BookAvailability, CategoryColor, LoanView, StaffRole, UserStatus } from "@/lib/constants";
 import type { CategoryIconName } from "@/lib/validators/category";
 import type { BookStatusFilter, PublicBookSort } from "@/lib/validators/book";
 import type {
@@ -15,6 +15,11 @@ import type {
   PageMeta,
   PublicUser,
 } from "@/types";
+
+// Loan wire shapes are **imported** (so this file can use them) and separately
+// re-exported below for components. `export … from` alone does not bring a name into
+// local scope, which is why both statements are needed.
+import type { LoanReturnResult, LoanSummary } from "@/types";
 
 /**
  * Typed client for the API.
@@ -445,6 +450,71 @@ export const categoriesApi = {
 
   remove: (id: string) =>
     request<{ id: string }>(`/categories/${id}`, { method: "DELETE" }),
+};
+
+/* -------------------------------------------------------------------------- */
+/* Loans (spec 11)                                                             */
+/* -------------------------------------------------------------------------- */
+
+/** The per-row shape is one declaration, re-exported from `types/index.ts`. */
+export type {
+  LoanBookRef,
+  LoanDisplayState,
+  LoanFineRef,
+  LoanMemberRef,
+  LoanReturnResult,
+  LoanSummary,
+} from "@/types";
+
+/** Mirrors `listLoansQuerySchema`. `status` is the *derived* view vocabulary. */
+export type LoanListFilters = {
+  q?: string;
+  status?: LoanView;
+  memberId?: string;
+  bookId?: string;
+  /** `YYYY-MM-DD`, inclusive. */
+  from?: string;
+  /** `YYYY-MM-DD`, inclusive. */
+  to?: string;
+  page?: number;
+  limit?: number;
+};
+
+export type IssueLoanInput = {
+  /** A member id. Role-checked by the service. */
+  memberId: string;
+  /** A book id **or** slug — the desk has a barcode or a title. */
+  bookId: string;
+  notes?: string;
+};
+
+export const loansApi = {
+  /** Staff. One page of loans, with `meta` for pagination. */
+  list: (filters: LoanListFilters = {}, signal?: AbortSignal) =>
+    requestWithMeta<{ items: LoanSummary[] }>("/loans", { query: filters, signal }),
+
+  /**
+   * The signed-in user's own loans. Takes **no id** — the server resolves it from the
+   * session, so a member cannot ask for someone else's loans by editing a URL.
+   */
+  mine: (filters: { status?: LoanView; page?: number; limit?: number } = {}, signal?: AbortSignal) =>
+    requestWithMeta<{ items: LoanSummary[] }>("/loans/mine", { query: filters, signal }),
+
+  issue: (input: IssueLoanInput) =>
+    request<{ loan: LoanSummary }>("/loans/issue", { method: "POST", body: input }).then(
+      (d) => d.loan,
+    ),
+
+  /**
+   * Returns the loan and the fine it raised, so the desk can say so immediately.
+   * `fine` is `null` until Unit 13 fills the hook in.
+   */
+  return: (loanId: string) =>
+    request<LoanReturnResult>(`/loans/${loanId}/return`, { method: "POST" }),
+
+  /** Staff on anyone's loan; a member on their own. 403 otherwise. */
+  renew: (loanId: string) =>
+    request<{ loan: LoanSummary }>(`/loans/${loanId}/renew`, { method: "POST" }).then((d) => d.loan),
 };
 
 /* -------------------------------------------------------------------------- */

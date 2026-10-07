@@ -340,16 +340,91 @@ export type PublicUser = {
 };
 
 /* -------------------------------------------------------------------------- */
-/* Member record (spec 10)                                                     */
+/* Loans (spec 11)                                                             */
 /* -------------------------------------------------------------------------- */
 
-/** Enough of a book to render a row in a member's history. */
-export type MemberBookRef = {
+/** Just enough of a book for a loan row. Deliberately smaller than `MemberBookRef`. */
+export type LoanBookRef = {
   id: string;
   title: string;
   authors: string[];
   cover: CloudinaryImage | null;
+  slug: string;
 };
+
+/** Just enough of a member for a loan row. Never includes the email unless asked. */
+export type LoanMemberRef = {
+  id: string;
+  name: string;
+  membershipId: string | null;
+  avatar: CloudinaryImage | null;
+};
+
+/**
+ * One loan, as the circulation desk and "My Loans" both need it.
+ *
+ * `status` is the **stored** state and `view` is the **derived** one. `overdue` and
+ * `due_soon` never exist in the database (invariant 4), so `circulation.ts` derives
+ * them once and puts them on the wire. A client that recomputed them would have to
+ * re-derive the rule, and the desk and the member's own page would then disagree about
+ * whether a book is late.
+ *
+ * `fineAmount` is denormalised onto the loan document precisely so a list never has to
+ * join the `Fine` collection.
+ */
+export type LoanSummary = {
+  id: string;
+  book: LoanBookRef;
+  member: LoanMemberRef;
+  /** Stored: `active` or `returned`. */
+  status: LoanStatus;
+  /** Derived for display and for the `overdue` / `due_soon` filters. */
+  view: LoanDisplayState;
+  issuedAt: string;
+  dueDate: string;
+  returnedAt: string | null;
+  renewCount: number;
+  fineAmount: number;
+  /** Staff-only note captured at the desk. */
+  notes: string | null;
+  /** Whole days until the due date. Negative once overdue, `0` once returned. */
+  daysLeft: number;
+  /** Whole days past the due date. `0` unless `view` is `overdue`. */
+  daysOverdue: number;
+};
+
+/**
+ * The shape returned by a return.
+ *
+ * `fine` is the point of the extra field: returning a book late is the moment a fine is
+ * created, and the desk needs to say so immediately rather than send the member away and
+ * have them discover it later. `null` until Unit 13 gives the fine real content.
+ */
+export type LoanReturnResult = {
+  loan: LoanSummary;
+  fine: LoanFineRef | null;
+};
+
+/** The fine raised by a return, or the existing one on the loan. */
+export type LoanFineRef = {
+  id: string;
+  amount: number;
+  status: FineStatus;
+  daysOverdue: number;
+  ratePerDay: number;
+};
+
+/**
+ * The book on a member record.
+ *
+ * An alias of `LoanBookRef`, so a loan row is the same shape wherever it appears —
+ * the circulation desk, "My Loans", and the member's own history. Two declarations of
+ * "a book as shown next to a loan" is how the Unit 08 payload drifted.
+ *
+ * Carrying `slug` also means the member record can link straight to
+ * `/catalog/[slug]` instead of guessing a search query from the title.
+ */
+export type MemberBookRef = LoanBookRef;
 
 /**
  * The derived, displayable state of a loan.
@@ -372,22 +447,18 @@ export type LoanDisplayState = "on_time" | "due_soon" | "overdue" | "returned";
  * have to re-derive the rule, and would then disagree with the circulation desk in
  * Unit 11/12 — two answers to "is this late?" is exactly the bug worth designing out.
  */
-export type MemberLoan = {
-  id: string;
-  book: MemberBookRef;
-  /** Stored: `active` or `returned`. */
-  status: LoanStatus;
-  /** Derived for display. */
-  view: LoanDisplayState;
-  issuedAt: string;
-  dueDate: string;
-  returnedAt: string | null;
-  renewCount: number;
-  /** Fine attached to this loan; denormalised onto the loan document. */
-  fineAmount: number;
-  /** Whole days past `dueDate`. `0` unless `view` is `overdue`. */
-  daysOverdue: number;
-};
+/**
+ * The member record's loans, as returned by `GET /api/members/:id`.
+ *
+ * `Omit<LoanSummary, "member">` rather than a separate declaration. The two used to be
+ * independent types describing the same row, which is how the Unit 08 book payload
+ * drifted into a type error with no visible cause; deriving one from the other means a
+ * field added to a loan reaches the member record automatically.
+ *
+ * `member` is the only omission: on the member's own record, repeating who the loan
+ * belongs to on every row is noise, and the desk's version keeps it.
+ */
+export type MemberLoan = Omit<LoanSummary, "member">;
 
 export type MemberFine = {
   id: string;
