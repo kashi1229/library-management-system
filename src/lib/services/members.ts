@@ -13,7 +13,8 @@ import {
   type ReservationStatus,
   type Role,
 } from "@/lib/constants";
-import { bookRefOr as refFor, bookRefs, deriveLoanState } from "@/lib/services/circulation";
+import { deriveLoanState } from "@/lib/services/circulation";
+import { bookRefOr as refFor, bookRefs } from "@/lib/services/refs";
 
 /** Where the notification sends the member when their account status changes. */
 const PROFILE_LINK = "/profile";

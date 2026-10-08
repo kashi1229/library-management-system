@@ -13,6 +13,16 @@ type StatTone = "default" | "accent" | "danger" | "success" | "warning" | "info"
 type StatCardProps = {
   label: string;
   value: number;
+  /**
+   * How to render the number. Defaults to `toLocaleString`.
+   *
+   * **Needed for money.** A card whose label is "Unpaid total" and whose value is `20`
+   * reads as twenty of something; `$20.00` reads as twenty currency units. `CountUp`
+   * animates the raw number and `format` is applied to the animated value, so the count-up
+   * still works and the currency symbol appears on every frame rather than popping in at
+   * the end.
+   */
+  format?: (value: number) => string;
   /** Rendered after the number, e.g. `"copies"`. */
   suffix?: string;
   icon?: React.ComponentType<{ className?: string; strokeWidth?: number }>;
@@ -30,6 +40,7 @@ type StatCardProps = {
 export function StatCard({
   label,
   value,
+  format,
   suffix,
   icon: Icon,
   tone = "default",
@@ -37,6 +48,7 @@ export function StatCard({
   className,
 }: StatCardProps) {
   const accent = TONE_STYLES[tone];
+  const render = format ?? ((n: number) => n.toLocaleString("en-US"));
 
   return (
     <Card className={cn("gap-3 p-5", className)}>
@@ -49,10 +61,7 @@ export function StatCard({
         ) : null}
       </div>
       <p className="flex items-baseline gap-1.5">
-        <CountUp
-          value={value}
-          className={cn("font-display text-h2 font-semibold tracking-[-0.02em] tabular-nums", accent.value)}
-        />
+        <CountUp value={value} format={render} className={cn("font-display text-h2 font-semibold tracking-[-0.02em] tabular-nums", accent.value)} />
         {suffix ? <span className="text-small text-muted-foreground">{suffix}</span> : null}
       </p>
       {hint ? <p className="text-caption text-muted-foreground">{hint}</p> : null}
@@ -91,7 +100,15 @@ const TONE_STYLES = {
  * the rendered number always mirrors the `value` prop, so a data refresh can
  * never leave a stale count on screen.
  */
-function CountUp({ value, className }: { value: number; className?: string }) {
+function CountUp({
+  value,
+  format,
+  className,
+}: {
+  value: number;
+  format: (value: number) => string;
+  className?: string;
+}) {
   const ref = React.useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true, margin: "0px 0px -10% 0px" });
   const reduced = usePrefersReducedMotion();
@@ -115,7 +132,7 @@ function CountUp({ value, className }: { value: number; className?: string }) {
 
   return (
     <span ref={ref} className={className}>
-      {(running ? animated : value).toLocaleString("en-US")}
+      {format(running ? animated : value)}
     </span>
   );
 }

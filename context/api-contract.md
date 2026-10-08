@@ -112,9 +112,17 @@ provides one; a standalone local `mongod` does not — see the progress tracker)
 
 ## Fines
 | GET | /fines/mine | M | List + `outstandingTotal` |
-| GET | /fines | S | Filters `status, memberId, from, to`; with totals |
-| POST | /fines/:id/collect | S | `{ paymentMethod, note? }` |
+| GET | /fines | S | Filters `q, status, memberId, bookId, from, to`; with totals |
+| POST | /fines/:id/collect | S | `{ paymentMethod, amount, note? }` |
 | POST | /fines/:id/waive | S | `{ reason }` |
+
+- `amount` is **required and must equal `fine.amount` exactly** — a smaller amount (part
+  payment) and a larger one (overpayment) are both refused. `Fine` carries no `amountPaid`
+  or change field, so there is nowhere to record either. Collect and waive are **terminal**:
+  re-running either on a settled fine is a 4xx, not a silent no-op. `reason` is required on
+  waive and must be 3–500 characters.
+- `GET /fines` totals are computed across **all** fines, not the filtered page, so paging and
+  filtering cannot change the figures on the KPI cards.
 
 ## Wishlist & Reviews
 | GET | /wishlist | M | |

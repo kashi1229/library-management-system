@@ -340,6 +340,53 @@ export type PublicUser = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Fines (spec 13)                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One fine, as a member or a staff member sees it.
+ *
+ * `amount` is the **total** fine, and it does not change: collecting marks the fine `paid`,
+ * it does not reduce it. There is deliberately no `amountPaid` — a part payment would need
+ * a second field, a "part-paid" status and a partial state machine, and nothing in the
+ * specification asks for one. The service refuses a part payment with the outstanding
+ * figure rather than pretending to support it.
+ *
+ * `ratePerDay` is a **snapshot** of the policy when the fine was raised, so raising
+ * `finePerDay` next month does not retroactively change what this member was charged.
+ */
+export type FineSummary = {
+  id: string;
+  loanId: string;
+  bookId: string;
+  memberId: string;
+  daysOverdue: number;
+  ratePerDay: number;
+  /** Currency units. Never reduced — `status` carries the lifecycle. */
+  amount: number;
+  status: FineStatus;
+  paidAt: string | null;
+  paymentMethod: PaymentMethod | null;
+  reason: string | null;
+  note: string | null;
+  raisedAt: string;
+};
+
+/** A fine row, with the book and member it belongs to. */
+export type FineListItem = FineSummary & {
+  book: LoanBookRef;
+  member: { id: string; name: string; membershipId: string | null };
+};
+
+/** The three figures the staff fine page leads with. */
+export type FineTotals = {
+  /** Everything the library is owed right now, over all unpaid fines. */
+  unpaidTotal: number;
+  collectedThisMonth: number;
+  waivedThisMonth: number;
+};
+
+/* -------------------------------------------------------------------------- */
 /* Loans (spec 11)                                                             */
 /* -------------------------------------------------------------------------- */
 

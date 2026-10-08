@@ -3,15 +3,82 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, and members/team.**
-  Units 01–10 complete. Units 11 → 21 in progress per the developer's instruction to
+- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, and fines.**
+  Units 01–13 complete. Units 14 → 21 in progress per the developer's instruction to
   complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 12 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- **Units 11 and 12 complete; Unit 13 (Fines) is next** — `createFineIfLate` is waiting.
+- Build Units 14 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- **Units 11–13 complete; Unit 14 (Reservations) is next** — `promoteReservationQueue` and
+  `fulfilReadyReservationIfAny` are still the documented no-ops in `lib/services/hooks.ts`.
 
 ## Completed
+
+### Unit 13 — Fines ✅ · `feat/13-fines`
+- **Fine lifecycle end to end**: raised on a late return, listed on both sides, collected or
+  waived at the desk, and settled back into the member's borrowing limit.
+- **`createFineIfLate` moved out of the Unit 11 stub** into `lib/services/fines.ts` and now
+  runs **inside the return transaction**, so `loan.fineAmount`, the `Fine` document, the
+  `fine.create` audit row and the member's `fine_created` notification either all commit or
+  none do. Circulation still owns the day count and the fine owns the money, which is why the
+  amount and the "6 days late" badge cannot disagree.
+- **The rate is read from the settings singleton at request time**, never frozen into a `zod`
+  cap (invariant 7). `ratePerDay` is snapshotted onto the fine, so an admin changing
+  `finePerDay` next month does not retroactively alter what this fine was charged at.
+  `amount` is rounded to cents *before* the `maxFinePerLoan` comparison is persisted, so the
+  stored number matches the number the UI prints. A 400-day-overdue book caps at
+  `maxFinePerLoan`, it is not 2000 dollars.
+- **Four routes**: `GET /api/fines` (staff, filter by `q` / `status` / `memberId` / `bookId` /
+  `from` / `to`), `GET /api/fines/mine` (no member id — it comes from the session,
+  invariant 3), `POST /api/fines/:id/collect`, `POST /api/fines/:id/waive`.
+- **`collectFine` requires the amount to match exactly — neither less nor more.** `Fine` has
+  no `amountPaid` field, so a part payment has nowhere to record a balance (refused), and
+  overpaying has nowhere to record change (also refused). The second case was found while
+  building this unit: the check originally rejected only amounts *below* the fine, so
+  `$100` against a `$15` fine would have set `status: "paid"` while `fine.amount` stayed
+  `15.00`, and the `fine.collect` audit row would have claimed 100.00 was taken. Both now
+  fail loudly with the exact figure in the field error.
+- **`waiveFine` requires a reason** (`min(3)`, `max(500)`), because forgiving someone's debt
+  is the one fine action that leaves no trace of who decided it or why. Both actions are
+  **terminal**: a second collect or waive on a settled fine is refused, not silently ignored.
+- **The fine block is a real gate, not a warning.** `getMemberUnpaidFineTotal` is compared
+  against `fineBlockThreshold` in `issueLoan`, so a member over the threshold cannot borrow
+  until they settle. This is why that function exists separately from `listMyFines`:
+  circulation must not have to build a page of fines to ask "may this person borrow?".
+- **`/fines`** (member) — an outstanding-balance summary above a Unpaid / Paid / Waived tab
+  set, so the number a member actually came for is not below the fold.
+- **`/staff/fines`** — three KPI cards, then a filterable table. Two layouts from one array,
+  exactly as `MembersTable` and `LoansTable` do.
+- **`StatCard` gained an optional `format` prop.** It rendered `value.toLocaleString()`, which
+  is right for a count and wrong for an amount of money: the Unpaid total displayed as `20`
+  where the row beneath it displayed `$20.00`. Three identical-looking figures with no
+  currency mark is the kind of thing that is read as twenty books. `format` is applied to
+  the **animated** value, so the symbol is present on every frame of the count-up instead of
+  popping in at the end. Unit 17's dashboards need this too.
+- **`FineActionDialog` reuses `collectFineSchema` / `waiveFineSchema`** rather than restating
+  them. The browser is precisely where a duplicated rule would have drifted from the server's
+  copy: the form would call a value valid and the API would reject it. The form types are
+  `z.input<…>`, not the output type, because `amount` is `z.coerce`d and arrives as a string.
+- **`lib/services/refs.ts`** — the book/member reference lookups extracted so `fines.ts` and
+  `circulation.ts` can both use them. `fines.ts` imports from `circulation.ts`, so sharing
+  them directly would have been a circular import.
+- Verified: `tsc`, `eslint` and `next build` clean; all four fine routes and both pages
+  present in the build output. **42/42 API and business-rule checks passed** against the live
+  dev database: 3 days late at $5/day → $15, a very overdue loan caps at 250, on-time returns
+  create no fine, `loan.fineAmount` matches the Fine document, part payment is refused,
+  collect and waive are terminal, waive demands a reason, and a member over the threshold is
+  blocked. **Staff page browser-verified** at 1280 / 768 / 390 px with no horizontal
+  overflow, both dialogs opening correctly and **zero console or page errors**.
+- **The audit actor was wrong on first write.** `createFineIfLate` was passing the **loan's**
+  id with a fabricated `"system" as never` role, which would have written every
+  `fine.create` row attributed to a loan instead of to the staff member who took the book
+  back — an audit trail that points at the wrong entity, on the one collection whose whole
+  purpose is to be defensible. There is no `system` role; the real `actor` is now passed in
+  from `returnLoan`. `tsc` passed throughout because `as never` defeats the type check, which
+  is exactly the case a cast exists to hide.
+- **Not done:** a fine created outside a loan-return path (a manual charge) — the spec has no
+  such action, so there is no way to raise one from the UI, and inventing a route for it
+  would be a way to fine someone by accident.
 
 ### Unit 12 — Circulation UI ✅ · `feat/12-circulation-ui`
 - **`/staff/circulation`** — the desk. Two search cards side by side (member, book), an
@@ -381,19 +448,24 @@ tracker before this unit started.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **13** Fines → **14** Reservations → **15** Wishlist & Reviews →
+1. **14** Reservations → **15** Wishlist & Reviews →
    **16** Notifications → **17** Dashboards → **18** Reports & Audit → **19** Settings →
    **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
-   - **Unit 13 unblocks circulation's return path.** `createFineIfLate` in
-     `lib/services/hooks.ts` computes the lateness and returns `null`; it needs to create the
-     `Fine` document and write `loan.fineAmount`. Until then the desk's Return dialog
-     promises a fine it cannot create, which is why its copy is written to work either way.
-   - **Unit 14 unblocks the queue.** `promoteReservationQueue` and
-     `fulfilReadyReservationIfAny` are no-ops, so a returned copy is not offered to the
-     member waiting for it and a collected hold is left dangling.
-   - Both still need the **replica set** question answered before they can be exercised.
+   - **Unit 13 is done — circulation's return path is live.** `createFineIfLate` has moved to
+     `lib/services/fines.ts`, creates the `Fine`, writes `loan.fineAmount`, and the return
+     dialog's "a fine was added" toast is now a real charge rather than a promise.
+   - **Unit 14 is next and unblocks the queue.** `promoteReservationQueue` and
+     `fulfilReadyReservationIfAny` are still no-ops in `lib/services/hooks.ts`, so a returned
+     copy is not offered to the member waiting for it and a collected hold is left dangling.
+     A returned book now has a fine attached to it, so the ready notification Unit 14 sends
+     should link to `/fines` as well as `/my-loans`.
+   - **The replica set question is answered** — the local `mongod` is now a single-node `rs0`
+     and transactions commit. See "Transactions now work" below. Do not build a
+     non-transactional fallback; the loud failure was the correct behaviour.
    - `GET /api/members/lookup` and `loansApi.list` already serve the Unit 12 UI; do not
-     build second versions.
+     build second versions. `getMemberUnpaidFineTotal` already serves the issue gate.
+   - `StatCard` now takes an optional `format`; Unit 17's money figures should pass one rather
+     than letting `toLocaleString` render a currency amount as a bare number.
 
 ### Unit 12 — bugs found by the developer using the page
 Reported as "all four tabs are broken and I cannot issue a book". **Two entirely different

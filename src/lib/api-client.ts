@@ -1,7 +1,16 @@
 import type { NextResponse } from "next/server";
 import type { ApiFailure, ApiSuccess } from "@/lib/api";
 import type { FieldErrors } from "@/lib/api";
-import type { BookSort, BookAvailability, CategoryColor, LoanView, StaffRole, UserStatus } from "@/lib/constants";
+import type {
+  BookSort,
+  BookAvailability,
+  CategoryColor,
+  FineStatus,
+  LoanView,
+  PaymentMethod,
+  StaffRole,
+  UserStatus,
+} from "@/lib/constants";
 import type { CategoryIconName } from "@/lib/validators/category";
 import type { BookStatusFilter, PublicBookSort } from "@/lib/validators/book";
 import type {
@@ -16,10 +25,9 @@ import type {
   PublicUser,
 } from "@/types";
 
-// Loan wire shapes are **imported** (so this file can use them) and separately
-// re-exported below for components. `export … from` alone does not bring a name into
-// local scope, which is why both statements are needed.
-import type { LoanReturnResult, LoanSummary } from "@/types";
+// Fine wire shapes are **imported** (so this file can use them) and separately re-exported
+// below for components. `export … from` alone does not bring a name into local scope.
+import type { FineListItem, FineTotals, LoanReturnResult, LoanSummary } from "@/types";
 
 /**
  * Typed client for the API.
@@ -523,6 +531,67 @@ export const loansApi = {
   /** Staff on anyone's loan; a member on their own. 403 otherwise. */
   renew: (loanId: string) =>
     request<{ loan: LoanSummary }>(`/loans/${loanId}/renew`, { method: "POST" }).then((d) => d.loan),
+};
+
+/* -------------------------------------------------------------------------- */
+/* Fines (spec 13)                                                             */
+/* -------------------------------------------------------------------------- */
+
+/** Wire shapes are declared once in `types/index.ts`; re-exported here for components. */
+export type { FineListItem, FineSummary, FineTotals } from "@/types";
+
+/** Mirrors `listFinesQuerySchema`. */
+export type FineListFilters = {
+  q?: string;
+  status?: FineStatus;
+  memberId?: string;
+  bookId?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  limit?: number;
+};
+
+export type CollectFineInput = {
+  paymentMethod: PaymentMethod;
+  /** Must cover the outstanding amount; the service refuses a part payment. */
+  amount: number;
+  note?: string;
+};
+
+export const finesApi = {
+  /** Staff. Returns the page **and** the three KPI totals. */
+  list: (filters: FineListFilters = {}, signal?: AbortSignal) =>
+    requestWithMeta<{ items: FineListItem[]; totals: FineTotals }>("/fines", {
+      query: filters,
+      signal,
+    }),
+
+  /**
+   * The signed-in user's own fines. Takes **no id** — resolved from the session, so a
+   * member cannot read someone else's by editing the URL.
+   */
+  mine: (
+    filters: { status?: FineStatus; page?: number; limit?: number } = {},
+    signal?: AbortSignal,
+  ) =>
+    requestWithMeta<{ items: FineListItem[]; outstandingTotal: number }>("/fines/mine", {
+      query: filters,
+      signal,
+    }),
+
+  /** `unpaid → paid`. A repeat attempt is a 400, not a silent no-op. */
+  collect: (id: string, input: CollectFineInput) =>
+    request<{ fine: FineListItem }>(`/fines/${id}/collect`, { method: "POST", body: input }).then(
+      (d) => d.fine,
+    ),
+
+  /** `unpaid → waived`. A reason is required and stored on the document. */
+  waive: (id: string, reason: string) =>
+    request<{ fine: FineListItem }>(`/fines/${id}/waive`, {
+      method: "POST",
+      body: { reason },
+    }).then((d) => d.fine),
 };
 
 /* -------------------------------------------------------------------------- */

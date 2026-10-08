@@ -2,48 +2,29 @@ import "server-only";
 import { Reservation } from "@/models";
 import { ACTIVE_RESERVATION_STATUSES } from "@/lib/constants";
 import type { ClientSession, Types } from "mongoose";
-import type { LoanDoc } from "@/types";
 
 /**
  * Cross-unit seams for circulation (spec 11 §Stub contract file).
  *
  * `circulation.ts` calls these at exactly the points where the unit that owns the
- * behaviour plugs in. **They exist so the call sites are final and stable**: when Unit 13
- * or Unit 14 lands, the work is filling in a function body here rather than restructuring
- * a transaction, which is the part that is genuinely expensive to get wrong.
+ * behaviour plugs in. **They exist so the call sites are final and stable**: when Unit 14
+ * lands, the work is filling in a function body here rather than restructuring a
+ * transaction, which is the part that is genuinely expensive to get wrong.
  *
  * | Hook | Owner | Behaviour today |
  * |---|---|---|
- * | `createFineIfLate` | **Unit 13** (Fines) | computes the amount, creates nothing, returns `null` |
- * | `promoteReservationQueue` | **Unit 14** (Reservations) | no-op |
+ * | `createFineIfLate` | **Unit 13** ✅ | **done — now in `services/fines.ts`** |
+ * | `promoteReservationQueue` | **Unit 14** | no-op |
  * | `fulfilReadyReservationIfAny` | **Unit 14** | no-op, reports that nothing was fulfilled |
  * | `countOtherReservations` | — | **real**, see below |
  *
  * `withTransaction` is the reason these take a `session`: the caller is already inside a
  * transaction, and a hook that opened its own connection would write outside it.
- */
-
-/**
- * Is this return late, and by how much? **Unit 13 owns the money.**
  *
- * `daysOverdue` is computed **here** rather than by the caller, because the fine's amount
- * is `daysOverdue × ratePerDay` and the two must not be able to disagree. The calendar-day
- * arithmetic is invariant 12 and is shared with `deriveLoanState`, so the badge on the
- * desk and the amount charged always describe the same lateness.
- *
- * Returns `null` for an on-time return, which is what the caller surfaces as "no fine".
+ * `createFineIfLate` used to live here as a stub. It has moved to `services/fines.ts`,
+ * because it is no longer a placeholder — and leaving a stub beside a real implementation
+ * would invite someone to call the wrong one.
  */
-export async function createFineIfLate(
-  loan: Pick<LoanDoc, "_id" | "member" | "book" | "dueDate">,
-  returnedAt: Date,
-  session: ClientSession,
-): Promise<null> {
-  // Unit 13 replaces this with a real `Fine.create([...], { session })`.
-  void loan;
-  void returnedAt;
-  void session;
-  return null;
-}
 
 /**
  * Offer the freed copy to the next member in the queue. **Unit 14 owns the queue.**
