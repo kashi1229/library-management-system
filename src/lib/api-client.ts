@@ -8,6 +8,7 @@ import type {
   FineStatus,
   LoanView,
   PaymentMethod,
+  ReservationStatus,
   StaffRole,
   UserStatus,
 } from "@/lib/constants";
@@ -27,7 +28,14 @@ import type {
 
 // Fine wire shapes are **imported** (so this file can use them) and separately re-exported
 // below for components. `export … from` alone does not bring a name into local scope.
-import type { FineListItem, FineTotals, LoanReturnResult, LoanSummary } from "@/types";
+import type {
+  FineListItem,
+  FineTotals,
+  LoanReturnResult,
+  LoanSummary,
+  MemberReservations,
+  ReservationSummary,
+} from "@/types";
 
 /**
  * Typed client for the API.
@@ -592,6 +600,70 @@ export const finesApi = {
       method: "POST",
       body: { reason },
     }).then((d) => d.fine),
+};
+
+/* -------------------------------------------------------------------------- */
+/* Reservations (spec 14)                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Wire shapes are declared once in `types/index.ts`; re-exported here for components.
+ * `MemberReservation` is already re-exported by the Members block above, which is where a
+ * component that reads a member record imports it from.
+ */
+export type { MemberReservations, QueueEntry, QueueInfo, ReservationSummary } from "@/types";
+
+/**
+ * Mirrors `listReservationsQuerySchema`. `status` is a **list**, sent as one
+ * comma-separated value (`?status=waiting,ready`) — which is what lets the staff History tab
+ * ask for three closed states in one paginated request instead of three.
+ */
+export type ReservationListFilters = {
+  status?: ReservationStatus[];
+  bookId?: string;
+  page?: number;
+  limit?: number;
+};
+
+export const reservationsApi = {
+  /** Staff. The register tabs and the per-book queue behind "View queue". */
+  list: (filters: ReservationListFilters = {}, signal?: AbortSignal) =>
+    requestWithMeta<{ items: ReservationSummary[] }>("/reservations", {
+      query: {
+        status: filters.status?.join(","),
+        bookId: filters.bookId,
+        page: filters.page,
+        limit: filters.limit,
+      },
+      signal,
+    }),
+
+  /**
+   * The signed-in user's own holds, already grouped ready / waiting / past.
+   * Takes **no id** — the server resolves it from the session, so a member cannot read
+   * someone else's queue by editing a URL.
+   */
+  mine: (signal?: AbortSignal) => request<MemberReservations>("/reservations/mine", { signal }),
+
+  /** Join a queue. 201, or a 400 whose message names the rule that refused it. */
+  reserve: (bookId: string) =>
+    request<{ reservation: ReservationSummary }>("/reservations", {
+      method: "POST",
+      body: { bookId },
+    }).then((d) => d.reservation),
+
+  /** Own hold or, for staff, anyone's. Cancelling a `ready` hold frees the copy. */
+  cancel: (id: string) =>
+    request<{ reservation: ReservationSummary }>(`/reservations/${id}`, { method: "DELETE" }).then(
+      (d) => d.reservation,
+    ),
+
+  /** Staff. Issues the book from a `ready` hold and closes it in one transaction. */
+  fulfil: (id: string) =>
+    request<{ reservation: ReservationSummary; loan: LoanSummary }>(
+      `/reservations/${id}/fulfil`,
+      { method: "POST" },
+    ),
 };
 
 /* -------------------------------------------------------------------------- */

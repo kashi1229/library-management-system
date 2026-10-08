@@ -298,6 +298,34 @@ export type UserBookState = {
   activeLoan: boolean;
   /** Reservation status (`waiting`/`ready`) or `null` when they have none. */
   reservation: ReservationStatus | null;
+  /**
+   * That reservation's own id, or `null` when they have none.
+   *
+   * **The book id is not a substitute.** Cancelling needs `DELETE /api/reservations/:id`, and
+   * the detail page only knows the book's id — sending that would cancel whatever hold the
+   * id happened to match, or 404. A control labelled "Cancel" has to actually cancel, not
+   * navigate to another page and ask there.
+   */
+  reservationId: string | null;
+  /**
+   * Their 1-based place among the people waiting for this book, or `null` when they hold
+   * nothing. Also `null` while their own hold is `ready` — see `queuePosition` on
+   * `ReservationSummary` for why a ready hold is counted in the order but never numbered.
+   *
+   * **Carried on the wire rather than derived by the client.** "You'd be #3 in line" needs
+   * the place they would get, and "You're #2 in line" needs the place they have. The FIFO
+   * order lives in one read in the service, not in a second implementation in a component.
+   */
+  reservationPosition: number | null;
+  /**
+   * Whole hours left on *their own* ready hold, rounded up by the server, or `null` unless
+   * `reservation` is `ready`.
+   *
+   * Server-derived for the same reason as `reservationPosition`: the rounding rule for a
+   * hold countdown exists once, in `services/reservations.ts`. A component that recomputed
+   * it from `expiresAt` would print "0 hours left" while a copy was still on the shelf.
+   */
+  readyHoldHours: number | null;
 };
 
 /** Public catalog detail: everything a reader needs to decide, nothing they can't use. */
@@ -521,15 +549,115 @@ export type MemberFine = {
   reason: string | null;
 };
 
-export type MemberReservation = {
+/* -------------------------------------------------------------------------- */
+/* Reservations (spec 14)                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One reservation, as the member's own page and the staff register both need it.
+ *
+ * `status` is the **stored** state (`waiting | ready | fulfilled | cancelled | expired`).
+ * There is no derived state here: a hold is either open or it is closed, and rule 7 turns
+ * a closed-overdue `ready` hold into `expired` on the next lazy sweep rather than leaving
+ * it to be interpreted at read time.
+ *
+ * `queuePosition` counts **every active holder on the book**, so the first `ready` hold
+ * sits at position 1 and the first person `waiting` behind it is #2. That is what a member
+ * means by "their place in the queue": three copies returned means three people ahead of
+ * you will be served before you are, whoever picked them up.
+ *
+ * `hoursUntilExpiry` is **server-derived and rounded up**, and only present for a `ready`
+ * hold. A hold that has 20 minutes left says "1 hour", never "0 hours" — a countdown that
+ * reads zero while a copy is still on the shelf for you is the number a member would
+ * screenshot and ask about. The UI never recomputes it from `expiresAt`.
+ */
+export type ReservationSummary = {
   id: string;
-  book: MemberBookRef;
   status: ReservationStatus;
-  /** 1-based place in the FIFO queue. `null` once `ready` or once the hold closed. */
+  book: LoanBookRef;
+  member: { id: string; name: string; membershipId: string | null };
+  /**
+   * 1-based place among the people **waiting** for this book. `null` once the hold is
+   * `ready` and once it is closed.
+   *
+   * A `ready` hold still counts towards the arithmetic — three copies returned means the
+   * first person still waiting is #4, which is true because three people will be served
+   * before them — but carries no number of its own. Giving it one would label two members
+   * #1 on the same book, and a member whose copy is already set aside is not waiting for a
+   * place. See `activeQueuePositions` in `services/reservations.ts`, which owns the rule.
+   */
   queuePosition: number | null;
+  /** When the member joined the queue (`createdAt`). */
+  requestedAt: string;
+  /** When the queue promoted them and a copy was set aside. */
+  readyAt: string | null;
+  /** `readyAt + reservationHoldHours`. The copy returns to the shelf after this. */
+  expiresAt: string | null;
+  /** Whole hours until the hold closes, rounded up. `null` unless `status === "ready"`. */
+  hoursUntilExpiry: number | null;
+  /** The loan created when the hold was fulfilled. */
+  fulfilledLoanId: string | null;
+  /** When the hold was released, for a cancelled reservation. */
+  cancelledAt: string | null;
+};
+
+/**
+ * A reservation on a member's own record.
+ *
+ * `Omit<ReservationSummary, "member">` for the same reason `MemberLoan` is
+ * `Omit<LoanSummary, "member">`: on a member's own screen, repeating who the row belongs
+ * to on every line is noise, and one derived type cannot drift from the list row it is a
+ * projection of.
+ */
+export type MemberReservation = Omit<ReservationSummary, "member">;
+
+/**
+ * A member's own holds, already grouped.
+ *
+ * **Grouped by the server rather than in the component.** The three groups are the whole
+ * screen, and grouping a paginated list in the browser silently loses rows the moment a
+ * member has more than one page — which is exactly what "Past" always is. `past` is
+ * capped at `MEMBER_HISTORY_LIMIT` and `pastTotal` is the real count, so the UI can say
+ * "showing the 50 most recent of 340" rather than implying the list is everything.
+ */
+export type MemberReservations = {
+  /** A copy is set aside and waiting to be collected. */
+  ready: MemberReservation[];
+  /** In the queue, no copy held yet. */
+  waiting: MemberReservation[];
+  /** Fulfilled, cancelled or expired, newest first. */
+  past: MemberReservation[];
+  /** Every closed reservation ever, so a capped `past` can admit it. */
+  pastTotal: number;
+};
+
+/** One place in a book's queue, for the staff "View queue" sheet. */
+export type QueueEntry = {
+  id: string;
+  member: { id: string; name: string; membershipId: string | null };
+  status: ReservationStatus;
+  /**
+   * 1-based place among the people waiting for this book. `null` unless `status` is
+   * `waiting` — the same rule as `ReservationSummary.queuePosition`, so the sheet and the
+   * list rows cannot disagree about who is where.
+   */
+  position: number | null;
+  requestedAt: string;
   readyAt: string | null;
   expiresAt: string | null;
-  requestedAt: string;
+};
+
+/** The whole live queue for one book. */
+export type QueueInfo = {
+  bookId: string;
+  /** `waiting` + `ready` — everyone currently in the queue for this book. */
+  queueLength: number;
+  /**
+   * This member's own place, or `null` when they hold nothing. Also `null` when their hold
+   * is `ready`: their place in the world is the countdown, not a number.
+   */
+  position: number | null;
+  entries: QueueEntry[];
 };
 
 /**

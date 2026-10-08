@@ -75,9 +75,13 @@ Notes added in Units 08–09:
   matching nothing.
 - **`userState` is derived from the session user id only** — never from the request body
   (invariant 3). An anonymous caller gets `{wishlisted:false, activeLoan:false,
-  reservation:null}`.
+  reservation:null, reservationId:null, reservationPosition:null, readyHoldHours:null}`.
 - **Archived books 404** on `/books/:id` and `/books/:id/related` for non-staff, so the
   archive is not enumerable through either route.
+- **The availability badge says "None available", not "All N out"** (Unit 14). The `available`
+  it receives is already `effectiveAvailable`, so on a two-copy book with one copy on loan and
+  the other held for somebody, "All 2 out" is false — one of them is on a shelf with a name on
+  it — while "none available" is true from the reader's side, which is what the badge is for.
 
 ## Members & Team
 | GET | /members | S | Query `q, status, page, limit` (role=member) |
@@ -104,11 +108,52 @@ provides one; a standalone local `mongod` does not — see the progress tracker)
 | GET | /settings/public | — | Display-safe policy subset: `libraryName, loanPeriodDays, maxActiveLoans, maxRenewals, renewalExtensionDays, finePerDay, currencySymbol, reservationHoldHours`. **Unauthenticated** — a member needs the loan period to read their own countdown. Deliberately excludes `contactEmail`, `fineBlockThreshold`, `maxFinePerLoan` and `lastMaintenanceAt`
 
 ## Reservations
-| GET | /reservations/mine | M | |
-| GET | /reservations | S | Filters `status, bookId` |
-| POST | /reservations | M | `{ bookId }` |
-| DELETE | /reservations/:id | M (own) / S | Cancel |
-| POST | /reservations/:id/fulfil | S | Issues the book from a *ready* reservation |
+| GET | /reservations/mine | M | Own holds, **already grouped** into `{ ready, waiting, past, pastTotal }`. No query parameters: the schema has none |
+| GET | /reservations | S | Filters `status` (comma-separated list, optional), `bookId`, `page`, `limit` |
+| POST | /reservations | M (active member) | `{ bookId }`. 201. Suspended members are refused |
+| DELETE | /reservations/:id | M (own) / S | Cancel. Cancelling a **`ready`** hold releases the copy and promotes the queue |
+| POST | /reservations/:id/fulfil | S | Requires `ready`. Issues the book from the hold and closes it **in one transaction**; returns `{ reservation, loan }` |
+
+Notes added in Unit 14:
+
+- **`status` accepts a comma-separated list** (`?status=waiting,ready`). A single-value
+  enum is not enough: the staff History tab is three states (`fulfilled,cancelled,expired`)
+  and must be one paginated request, because a tab assembled from three calls is a lie the
+  moment one of them fails. Every token is checked against `RESERVATION_STATUSES`, so a typo
+  is a 422 naming the valid values rather than an empty table.
+- **`/mine` returns the three groups already built**, plus `pastTotal` beside the capped
+  `past`, so the UI can say "the 50 most recent of 340". Grouping in the client would drop
+  rows the moment a member had more than one page of history — which is what "Past" always is.
+  It takes **no member id** and **no filters**: the schema has neither, so editing the URL
+  cannot reach somebody else's queue.
+- **Every refusal names the rule that fired.** The four reserve refusals are checked
+  specific-before-general: *already on loan* → *already reserved* → *reservation limit* (with
+  both numbers) → *copies are available, visit the desk*. A member who both holds the book
+  and is looking at a free copy satisfies two rules, and only the specific one tells them
+  what to fix.
+- **A staff account calling `POST /reservations` gets 403, not 400.** It is a role question,
+  not a business rule.
+- **`DELETE` is authorised in the service, not the route** — the owner and staff are both
+  allowed, and comparing the reservation's member against the session id is what tells them
+  apart (invariant 3). A member cancelling someone else's hold is 403.
+- **`cancel` and `fulfil` are terminal.** A second attempt is a 400 naming the state, not a
+  silent no-op.
+- **`hoursUntilExpiry` is server-derived and rounded up**, and is `null` unless `status` is
+  `ready`. Rounded up because the alternative is "0 hours left" while a copy is still on the
+  shelf. The client never recomputes it.
+- **`queuePosition` is non-null only while `waiting`.** A `ready` hold is *counted* in the
+  FIFO order (so the first person still waiting is #2) but carries no number of its own;
+  giving it one would label two members #1 on the same book.
+- **An automatic expiry writes no audit row.** `logAudit` requires an actor and there is
+  none — the clock did it. Inventing a "system" user is the bug Unit 13 hit. The
+  `ready → expired` state change plus the member's `reservation_expired` notification is the
+  record. `reservation.create` / `.cancel` / `.fulfil` **are** audited.
+- **A reservation whose book has been deleted still renders**, with `bookRefOr`'s
+  "No longer in the catalog" placeholder and an empty `slug`. The UI must not link it: an
+  empty slug in an href lands on `/catalog/`, which is a different page, not the book.
+- `GET /books/:id` gained `userState.reservationId`, `.reservationPosition` and
+  `.readyHoldHours` so the detail page can cancel and count down without a second request,
+  and without a second implementation of the FIFO or rounding rules in a component.
 
 ## Fines
 | GET | /fines/mine | M | List + `outstandingTotal` |

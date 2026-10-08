@@ -91,6 +91,20 @@ Compound idx `{ member, status }`, `{ book, status }`. Partial unique idx on `{ 
 | book (ref idx) | member (ref idx) | status enum `waiting|ready|fulfilled|cancelled|expired` (idx) | readyAt | expiresAt | fulfilledLoan (ref Loan) | cancelledBy (ref User) |
 Partial unique idx `{ book, member }` where status in (`waiting`,`ready`). Queue order = `createdAt` ascending among `waiting`.
 
+> No field was added or changed in Unit 14. What changed is **who owns the rules around them**:
+> the queue mechanics moved into `lib/services/hooks.ts` (`getReadyHoldCounts`,
+> `promoteReservationQueue`, `fulfilReadyReservationIfAny`, `countOtherReservations`) as the
+> leaf that both `circulation.ts` and `reservations.ts` depend on, and the FIFO ordering moved
+> into `activeQueuePositions` in `lib/services/reservations.ts` as the single reader for three
+> callers. See `architecture.md` for why the first split was unavoidable and the second was
+> pure deduplication.
+>
+> A reservation **outlives its book** in practice: the `Reservation` collection has no FK
+> enforcement, and `deleteBook` refuses while active holds exist but earlier QA deleted books
+> directly in Mongo. Readers must therefore tolerate a missing book — `bookRefOr` returns a
+> "No longer in the catalog" placeholder with an **empty `slug`**, and an empty slug is the
+> signal that the row must not be rendered as a link.
+
 ## Wishlist (`wishlists`)
 `{ member ref, book ref }`, unique compound idx `{ member, book }`.
 

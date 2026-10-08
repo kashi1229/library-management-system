@@ -7,9 +7,13 @@ import { Book, Fine, Loan, Reservation, User } from "@/models";
 import { logAudit } from "@/lib/services/audit";
 import { notify } from "@/lib/services/notifications";
 import { getSettings } from "@/lib/services/settings";
-import { getReadyHoldCounts } from "@/lib/services/books";
 import { bookRefOr, bookRefs, memberRefOr, memberRefs } from "@/lib/services/refs";
-import { countOtherReservations, fulfilReadyReservationIfAny, promoteReservationQueue } from "@/lib/services/hooks";
+import {
+  countOtherReservations,
+  fulfilReadyReservationIfAny,
+  getReadyHoldCounts,
+  promoteReservationQueue,
+} from "@/lib/services/hooks";
 import { createFineIfLate } from "@/lib/services/fines";
 import {
   DUE_SOON_DAYS,
@@ -17,6 +21,7 @@ import {
   type LoanStatus,
 } from "@/lib/constants";
 import type { IssueLoanInput, ListLoansQuery, ListMyLoansQuery } from "@/lib/validators/loan";
+import type { ClientSession } from "@/lib/db";
 import type {
   Actor,
   BookDoc,
@@ -143,187 +148,207 @@ function toLoan(
  * reaches the service because the route requires staff.
  */
 export async function issueLoan(input: IssueLoanInput, actor: Actor): Promise<LoanSummary> {
+  return withTransaction((session) => issueLoanInSession(input, actor, session));
+}
+
+/**
+ * The whole of `issueLoan`, minus the transaction wrapper.
+ *
+ * **Exported so `services/reservations.ts` can fulfil a hold atomically.** MongoDB does not
+ * support nested transactions, so `fulfilReservation` cannot call `issueLoan` from inside
+ * its own `withTransaction` block — the attempt would either fail outright or, worse,
+ * quietly commit the loan outside the caller's transaction and leave the hold dangling. So
+ * the transaction boundary is the only thing that differs, and it lives in exactly one place
+ * per entry point rather than being re-derived by the caller.
+ *
+ * Every rule below still runs **inside whichever transaction the caller opened**, so the
+ * member's loan count, the copy availability and the policy snapshot still describe the
+ * same moment whichever way this is reached.
+ */
+export async function issueLoanInSession(
+  input: IssueLoanInput,
+  actor: Actor,
+  session: ClientSession,
+): Promise<LoanSummary> {
   const memberId = new Types.ObjectId(input.memberId);
 
-  return withTransaction(async (session) => {
-    const settings = await getSettings();
-    const now = new Date();
+  const settings = await getSettings();
+  const now = new Date();
 
-    /* ------------------------------- Member ------------------------------- */
-    const member = await User.findById(memberId).session(session).lean<UserDoc>();
-    if (!member || member.role !== "member") {
-      throw AppError.notFound("That member could not be found.");
-    }
+  /* ------------------------------- Member ------------------------------- */
+  const member = await User.findById(memberId).session(session).lean<UserDoc>();
+  if (!member || member.role !== "member") {
+    throw AppError.notFound("That member could not be found.");
+  }
 
-    if (member.status !== "active") {
-      throw AppError.rule(
-        `${member.name} is suspended and cannot borrow. Reinstate the account first.`,
-        { memberId: "This member is suspended" },
-      );
-    }
-
-    /* -------------------------------- Book -------------------------------- */
-    // The desk has a barcode or a title, so accept an id **or** a slug.
-    const bookFilter = Types.ObjectId.isValid(input.bookId)
-      ? { _id: new Types.ObjectId(input.bookId) }
-      : { slug: input.bookId.trim().toLowerCase() };
-
-    const book = await Book.findOne(bookFilter).session(session).lean<BookDoc>();
-    if (!book) throw AppError.notFound("That book could not be found.");
-
-    const title = String(book.title);
-
-    if (book.status !== "active") {
-      throw AppError.rule(`“${title}” is archived, so it cannot be issued. Restore it first.`, {
-        bookId: "This book is archived",
-      });
-    }
-
-    /*
-     * **Duplicate check comes before availability, deliberately.**
-     *
-     * A one-copy book that this member already holds satisfies *both* refusals. Checked in
-     * the other order, the librarian who fat-fingered the issue button is told "every copy
-     * is on loan" — which is true, and useless, because returning the copy would clear that
-     * message while the actual mistake (issuing the same book twice) went unmentioned.
-     * "You already have this on loan" names the thing they have to fix.
-     *
-     * It is also the cheaper query: one indexed `exists` against
-     * `loan_member_status`, versus the hold-count read the availability branch needs.
-     */
-    if (await Loan.exists({ member: memberId, book: book._id, status: "active" }).session(session)) {
-      throw AppError.rule(
-        `${member.name} already has “${title}” on loan. Return it before borrowing it again.`,
-        { bookId: "Already on loan to this member" },
-      );
-    }
-
-    /*
-     * A copy set aside for a **ready** reservation is not available to anyone else
-     * (business rule 1 / rule 6), so availability is
-     * `availableCopies - holdsForOtherMembers`. The member's own hold is excluded,
-     * because issuing is how they collect it.
-     */
-    const readyHolds = (await getReadyHoldCounts([book._id])).get(String(book._id)) ?? 0;
-    const ownReadyHold = await Reservation.exists({
-      book: book._id,
-      member: memberId,
-      status: "ready",
-    }).session(session);
-
-    const heldForOthers = Math.max(0, readyHolds - (ownReadyHold ? 1 : 0));
-
-    if (!ownReadyHold && book.availableCopies - heldForOthers <= 0) {
-      throw AppError.rule(
-        heldForOthers > 0
-          ? `Every copy of “${title}” is on hold for another member.`
-          : `Every copy of “${title}” is on loan.`,
-        { bookId: "No copies available" },
-      );
-    }
-
-    /* ---------------------------- Policy limits ---------------------------- */
-    const activeLoans = await Loan.countDocuments({ member: memberId, status: "active" }).session(
-      session,
+  if (member.status !== "active") {
+    throw AppError.rule(
+      `${member.name} is suspended and cannot borrow. Reinstate the account first.`,
+      { memberId: "This member is suspended" },
     );
+  }
 
-    if (activeLoans >= settings.maxActiveLoans) {
-      throw AppError.rule(
-        `${member.name} already has ${activeLoans} ${activeLoans === 1 ? "book" : "books"} on loan. The limit is ${settings.maxActiveLoans}.`,
-        { memberId: `The limit is ${settings.maxActiveLoans} books` },
-      );
-    }
+  /* -------------------------------- Book -------------------------------- */
+  // The desk has a barcode or a title, so accept an id **or** a slug.
+  const bookFilter = Types.ObjectId.isValid(input.bookId)
+    ? { _id: new Types.ObjectId(input.bookId) }
+    : { slug: input.bookId.trim().toLowerCase() };
 
-    const [fineAgg] = await Fine.aggregate<{ total: number }>([
-      { $match: { member: memberId, status: "unpaid" } },
-      { $group: { _id: null, total: { $sum: "$amount" } } },
-    ]).session(session);
+  const book = await Book.findOne(bookFilter).session(session).lean<BookDoc>();
+  if (!book) throw AppError.notFound("That book could not be found.");
 
-    const owing = Math.round(fineAgg?.total ?? 0);
-    if (owing > settings.fineBlockThreshold) {
-      throw AppError.rule(
-        `${member.name} owes ${settings.currencySymbol}${owing.toFixed(2)} in unpaid fines, which is over the ${settings.currencySymbol}${settings.fineBlockThreshold} limit. Settle the balance before borrowing again.`,
-        { memberId: "Unpaid fines block new loans" },
-      );
-    }
+  const title = String(book.title);
 
-    /* ----------------------- Take the copy (atomic) ----------------------- */
-    /*
-     * The conditional update is the concurrency guard. Two requests for the last copy
-     * both pass the checks above, then race here — and only one matches
-     * `availableCopies > 0`. It also bypasses the document validator, which is what we
-     * want: the guard in the filter replaces it, and `availableCopies` cannot go negative
-     * because Mongo refuses the whole update when the condition fails.
-     */
-    const taken = await Book.findOneAndUpdate(
-      { _id: book._id, status: "active", availableCopies: { $gt: 0 } },
-      { $inc: { availableCopies: -1, borrowCount: 1 } },
-      { session, new: true },
-    ).lean<Record<string, unknown> | null>();
+  if (book.status !== "active") {
+    throw AppError.rule(`“${title}” is archived, so it cannot be issued. Restore it first.`, {
+      bookId: "This book is archived",
+    });
+  }
 
-    if (!taken) {
-      throw AppError.conflict(
-        `The last copy of “${title}” was just issued to someone else. Try another title or check back shortly.`,
-        { bookId: "No copies available" },
-      );
-    }
-
-    /* ------------------------------ The loan ------------------------------ */
-    const dueDate = addDays(now, settings.loanPeriodDays);
-
-    const [created] = await Loan.create(
-      [
-        {
-          book: book._id,
-          member: memberId,
-          issuedBy: actor.id,
-          issuedAt: now,
-          dueDate,
-          renewCount: 0,
-          status: "active",
-          fineAmount: 0,
-          notes: input.notes ?? null,
-        },
-      ],
-      { session },
+  /*
+   * **Duplicate check comes before availability, deliberately.**
+   *
+   * A one-copy book that this member already holds satisfies *both* refusals. Checked in
+   * the other order, the librarian who fat-fingered the issue button is told "every copy
+   * is on loan" — which is true, and useless, because returning the copy would clear that
+   * message while the actual mistake (issuing the same book twice) went unmentioned.
+   * "You already have this on loan" names the thing they have to fix.
+   *
+   * It is also the cheaper query: one indexed `exists` against
+   * `loan_member_status`, versus the hold-count read the availability branch needs.
+   */
+  if (await Loan.exists({ member: memberId, book: book._id, status: "active" }).session(session)) {
+    throw AppError.rule(
+      `${member.name} already has “${title}” on loan. Return it before borrowing it again.`,
+      { bookId: "Already on loan to this member" },
     );
+  }
 
-    // Rule 1: issuing to a member with a ready hold *is* that hold being collected.
-    const fulfilledHold = await fulfilReadyReservationIfAny(memberId, book._id, created._id, session);
+  /*
+   * A copy set aside for a **ready** reservation is not available to anyone else
+   * (business rule 1 / rule 6), so availability is
+   * `availableCopies - holdsForOtherMembers`. The member's own hold is excluded,
+   * because issuing is how they collect it.
+   */
+  const readyHolds = (await getReadyHoldCounts([book._id])).get(String(book._id)) ?? 0;
+  const ownReadyHold = await Reservation.exists({
+    book: book._id,
+    member: memberId,
+    status: "ready",
+  }).session(session);
 
-    await logAudit({
-      actor,
-      action: "loan.issue",
-      entityType: "Loan",
-      entityId: created._id,
-      summary: `Issued “${title}” to ${member.name}`,
-      meta: {
-        book: title,
-        member: member.name,
-        dueDate: dueDate.toISOString(),
-        fulfilledHold,
+  const heldForOthers = Math.max(0, readyHolds - (ownReadyHold ? 1 : 0));
+
+  if (!ownReadyHold && book.availableCopies - heldForOthers <= 0) {
+    throw AppError.rule(
+      heldForOthers > 0
+        ? `Every copy of “${title}” is on hold for another member.`
+        : `Every copy of “${title}” is on loan.`,
+      { bookId: "No copies available" },
+    );
+  }
+
+  /* ---------------------------- Policy limits ---------------------------- */
+  const activeLoans = await Loan.countDocuments({ member: memberId, status: "active" }).session(
+    session,
+  );
+
+  if (activeLoans >= settings.maxActiveLoans) {
+    throw AppError.rule(
+      `${member.name} already has ${activeLoans} ${activeLoans === 1 ? "book" : "books"} on loan. The limit is ${settings.maxActiveLoans}.`,
+      { memberId: `The limit is ${settings.maxActiveLoans} books` },
+    );
+  }
+
+  const [fineAgg] = await Fine.aggregate<{ total: number }>([
+    { $match: { member: memberId, status: "unpaid" } },
+    { $group: { _id: null, total: { $sum: "$amount" } } },
+  ]).session(session);
+
+  const owing = Math.round(fineAgg?.total ?? 0);
+  if (owing > settings.fineBlockThreshold) {
+    throw AppError.rule(
+      `${member.name} owes ${settings.currencySymbol}${owing.toFixed(2)} in unpaid fines, which is over the ${settings.currencySymbol}${settings.fineBlockThreshold} limit. Settle the balance before borrowing again.`,
+      { memberId: "Unpaid fines block new loans" },
+    );
+  }
+
+  /* ----------------------- Take the copy (atomic) ----------------------- */
+  /*
+   * The conditional update is the concurrency guard. Two requests for the last copy
+   * both pass the checks above, then race here — and only one matches
+   * `availableCopies > 0`. It also bypasses the document validator, which is what we
+   * want: the guard in the filter replaces it, and `availableCopies` cannot go negative
+   * because Mongo refuses the whole update when the condition fails.
+   */
+  const taken = await Book.findOneAndUpdate(
+    { _id: book._id, status: "active", availableCopies: { $gt: 0 } },
+    { $inc: { availableCopies: -1, borrowCount: 1 } },
+    { session, new: true },
+  ).lean<Record<string, unknown> | null>();
+
+  if (!taken) {
+    throw AppError.conflict(
+      `The last copy of “${title}” was just issued to someone else. Try another title or check back shortly.`,
+      { bookId: "No copies available" },
+    );
+  }
+
+  /* ------------------------------ The loan ------------------------------ */
+  const dueDate = addDays(now, settings.loanPeriodDays);
+
+  const [created] = await Loan.create(
+    [
+      {
+        book: book._id,
+        member: memberId,
+        issuedBy: actor.id,
+        issuedAt: now,
+        dueDate,
+        renewCount: 0,
+        status: "active",
+        fineAmount: 0,
+        notes: input.notes ?? null,
       },
-      session,
-    });
+    ],
+    { session },
+  );
 
-    await notify({
-      userId: memberId,
-      type: "loan_issued",
-      title: "Book issued",
-      message: `“${title}” is due on ${format(dueDate, "d MMM yyyy")}.`,
-      link: "/my-loans",
-      session,
-    });
+  // Rule 1: issuing to a member with a ready hold *is* that hold being collected.
+  const fulfilledHold = await fulfilReadyReservationIfAny(memberId, book._id, created._id, session);
 
-    const [refs, members] = await Promise.all([bookRefs([book._id]), memberRefs([memberId])]);
-
-    return toLoan(
-      created.toObject() as Record<string, unknown>,
-      bookRefOr(refs, book._id),
-      memberRefOr(members, memberId),
-      now,
-    );
+  await logAudit({
+    actor,
+    action: "loan.issue",
+    entityType: "Loan",
+    entityId: created._id,
+    summary: `Issued “${title}” to ${member.name}`,
+    meta: {
+      book: title,
+      member: member.name,
+      dueDate: dueDate.toISOString(),
+      fulfilledHold,
+    },
+    session,
   });
+
+  await notify({
+    userId: memberId,
+    type: "loan_issued",
+    title: "Book issued",
+    message: `“${title}” is due on ${format(dueDate, "d MMM yyyy")}.`,
+    link: "/my-loans",
+    session,
+  });
+
+  const [refs, members] = await Promise.all([bookRefs([book._id]), memberRefs([memberId])]);
+
+  return toLoan(
+    created.toObject() as Record<string, unknown>,
+    bookRefOr(refs, book._id),
+    memberRefOr(members, memberId),
+    now,
+  );
 }
 
 /* -------------------------------------------------------------------------- */

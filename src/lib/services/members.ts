@@ -14,6 +14,7 @@ import {
   type Role,
 } from "@/lib/constants";
 import { deriveLoanState } from "@/lib/services/circulation";
+import { activeQueuePositions, hoursUntil } from "@/lib/services/reservations";
 import { bookRefOr as refFor, bookRefs } from "@/lib/services/refs";
 
 /** Where the notification sends the member when their account status changes. */
@@ -142,47 +143,16 @@ async function activeLoanCounts(memberIds: Types.ObjectId[]): Promise<Map<string
  */
 
 /**
- * 1-based FIFO position for each of this member's waiting holds, in two queries total.
+ * 1-based FIFO position for each of this member's holds, in **one** ordered read.
  *
- * The alternative is one count query per hold, which is N round trips for a list that
- * is usually one or two rows long. Instead the whole queue for the handful of books
- * involved is fetched once in FIFO order and the position is counted off it.
+ * This used to live here as a private copy. Unit 14 needed exactly the same FIFO order for
+ * the reservations page, the staff register and the queue sheet, and three copies of
+ * "where is this member in the queue" is three answers — the same reasoning that produced
+ * `services/refs.ts`. It now lives in `services/reservations.ts` as
+ * `activeQueuePositions`, keyed by reservation id so one read serves all three callers.
  *
- * Sorted `createdAt: 1, _id: 1` to match the `Reservation` FIFO index, with `_id` as
- * the tiebreaker — without it, two holds created in the same millisecond have no
- * defined order and the same hold could report a different position on each load.
+ * `queue.get(reservationId)` replaces the old `positions` map directly.
  */
-async function queuePositions(
-  bookIds: unknown[],
-  memberId: Types.ObjectId,
-): Promise<Map<string, number>> {
-  const positions = new Map<string, number>();
-
-  const unique = [...new Set(bookIds.map(String))].filter((id) => Types.ObjectId.isValid(id));
-  if (unique.length === 0) return positions;
-
-  const queue = await Reservation.find({
-    book: { $in: unique.map((id) => new Types.ObjectId(id)) },
-    status: { $in: [...ACTIVE_RESERVATION_STATUSES] },
-  })
-    .sort({ createdAt: 1, _id: 1 })
-    .select("book member")
-    .lean<Array<Record<string, unknown>>>();
-
-  const seen = new Map<string, number>();
-
-  for (const entry of queue) {
-    const bookKey = String(entry.book);
-    const place = (seen.get(bookKey) ?? 0) + 1;
-    seen.set(bookKey, place);
-
-    if (String(entry.member) === memberId.toString()) {
-      positions.set(String(entry._id), place);
-    }
-  }
-
-  return positions;
-}
 
 /* -------------------------------------------------------------------------- */
 /* Read                                                                       */
@@ -314,7 +284,7 @@ export async function getMemberDetail(id: string): Promise<MemberDetail> {
       ...fines.map((fine) => fine.book),
       ...holds.map((hold) => hold.book),
     ]),
-    queuePositions(holds.map((hold) => hold.book), memberId),
+    activeQueuePositions(holds.map((hold) => hold.book)),
   ]);
 
   return {
@@ -364,9 +334,19 @@ export async function getMemberDetail(id: string): Promise<MemberDetail> {
       book: refFor(refs, hold.book),
       status: hold.status as ReservationStatus,
       queuePosition: queue.get(String(hold._id)) ?? null,
+      requestedAt: (hold.createdAt as Date).toISOString(),
       readyAt: hold.readyAt ? (hold.readyAt as Date).toISOString() : null,
       expiresAt: hold.expiresAt ? (hold.expiresAt as Date).toISOString() : null,
-      requestedAt: (hold.createdAt as Date).toISOString(),
+      // Same three derived fields the reservations pages show, by the same exported rule —
+      // not a second copy of the rounding, which is how the record tab and the member's
+      // own page end up disagreeing about how long a hold has left.
+      hoursUntilExpiry:
+        hold.status === "ready" && hold.expiresAt
+          ? hoursUntil(hold.expiresAt as Date, now)
+          : null,
+      fulfilledLoanId: hold.fulfilledLoan ? String(hold.fulfilledLoan) : null,
+      cancelledAt:
+        hold.status === "cancelled" ? (hold.updatedAt as Date).toISOString() : null,
     })),
   };
 }

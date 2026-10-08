@@ -50,8 +50,8 @@ export function AvailabilityBadge({
 
   const label = none
     ? queueLength > 0
-      ? `All copies out · ${queueLength} ${queueLength === 1 ? "person" : "people"} waiting`
-      : "All copies out"
+      ? `No copies available · ${queueLength} ${queueLength === 1 ? "person" : "people"} waiting`
+      : "No copies available"
     : `${safeAvailable} of ${safeTotal} available`;
 
   return (
@@ -72,10 +72,18 @@ export function AvailabilityBadge({
           </span>
         ) : null}
         <span className={cn("whitespace-nowrap", size === "sm" ? "text-caption" : "text-small")}>
+          {/*
+           * "No copies available" rather than "All N out", because `available` here is
+           * `effectiveAvailable`: it is already reduced by the copies promised to `ready`
+           * holds. On a two-copy book with one copy on loan and the other held for somebody,
+           * "All 2 out" is false — one of them is sitting on the shelf with a name on it —
+           * while "no copies available" is true from the reader's side and is the fact the
+           * badge exists to communicate. Who is waiting is already spelled out after it.
+           */}
           {none
             ? queueLength > 0
-              ? `${safeTotal === 0 ? "None" : `All ${safeTotal} out`} · ${queueLength} waiting`
-              : "All copies out"
+              ? `None available · ${queueLength} waiting`
+              : "None available"
             : `${safeAvailable} of ${safeTotal} available`}
         </span>
       </span>

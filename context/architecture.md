@@ -132,6 +132,46 @@ scripts/seed.ts                 seed script (spec in unit 21)
 > logs a deprecation warning. The exported function is therefore `export default async function proxy(...)`.
 > It is still the coarse first gate described in §Auth & Access Model — real enforcement is server-side.
 
+## Service layering (Unit 14)
+
+Services must not form a cycle. The rule that keeps them acyclic is **the shared thing goes in a
+leaf**, and there are two such leaves in `lib/services/`:
+
+```
+models, settings, notifications, audit      (no service dependencies)
+        ↑
+hooks.ts        — the reservation QUEUE layer: getReadyHoldCounts,
+                  promoteReservationQueue, fulfilReadyReservationIfAny,
+                  countOtherReservations.  Depends only on the above.
+        ↑
+circulation.ts   — issue, return, renew. Calls hooks.ts.
+fines.ts         — fine lifecycle + createFineIfLate.
+refs.ts          — bookRefs / memberRefs and their placeholders.
+        ↑
+reservations.ts  — reserve, cancel, fulfil, expire, list, getQueueInfo,
+                  activeQueuePositions, hoursUntil. Calls circulation + hooks + refs.
+        ↑
+books.ts, members.ts, routes, components
+```
+
+`reservations.ts` needs `circulation.ts` (fulfilling a hold issues a loan) and
+`circulation.ts` needs the queue primitives, so the primitives **cannot** live in
+`reservations.ts` — that is a cycle. It is the same reason `refs.ts` exists. Putting them in a
+leaf is what makes the graph acyclic; leaving a stub in the caller-facing service beside a real
+implementation elsewhere is what invites someone to call the wrong one.
+
+Two consequences worth stating:
+
+- **`circulation.ts` exports `issueLoanInSession`** — the whole of `issueLoan` minus the
+  transaction wrapper. MongoDB has **no nested transactions**, so a service that opens its own
+  `withTransaction` cannot call `issueLoan` from inside one without either failing or, worse,
+  committing the loan outside the caller's transaction. The transaction boundary is the only
+  difference between the two entry points, and it lives in one place per entry point.
+- **`getReadyHoldCounts` takes an optional `session`.** It was being read from inside
+  `issueLoan`'s transaction *without* it, so the hold count came from outside the snapshot the
+  rest of the transaction was reasoning about. Any hook called from inside a transaction must
+  take the session; a hook that opened its own connection would write outside it.
+
 > The root `src/app/page.tsx` is a Unit 01 placeholder. **Unit 20** introduces `app/(marketing)/page.tsx`,
 > which takes ownership of `/`; the placeholder must be deleted in that same unit to avoid a route conflict.
 

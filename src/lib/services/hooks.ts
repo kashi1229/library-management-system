@@ -1,80 +1,184 @@
 import "server-only";
-import { Reservation } from "@/models";
+import { addHours, format } from "date-fns";
+import { Book, Reservation } from "@/models";
 import { ACTIVE_RESERVATION_STATUSES } from "@/lib/constants";
+import { notify } from "@/lib/services/notifications";
+import { getSettings } from "@/lib/services/settings";
+import type { BookDoc } from "@/types";
 import type { ClientSession, Types } from "mongoose";
 
 /**
- * Cross-unit seams for circulation (spec 11 §Stub contract file).
+ * The reservation **queue layer** (spec 14).
  *
- * `circulation.ts` calls these at exactly the points where the unit that owns the
- * behaviour plugs in. **They exist so the call sites are final and stable**: when Unit 14
- * lands, the work is filling in a function body here rather than restructuring a
- * transaction, which is the part that is genuinely expensive to get wrong.
+ * This module owns the mechanics of the FIFO queue: how many copies are promised to
+ * `ready` holds, who gets promoted next, and how a member's own hold is consumed when
+ * their book is issued. `lib/services/reservations.ts` builds the member- and
+ * staff-facing operations on top of it — `reserveBook`, `cancelReservation`,
+ * `fulfilReservation`, `expireStaleReservations` and the list endpoints.
  *
- * | Hook | Owner | Behaviour today |
- * |---|---|---|
- * | `createFineIfLate` | **Unit 13** ✅ | **done — now in `services/fines.ts`** |
- * | `promoteReservationQueue` | **Unit 14** | no-op |
- * | `fulfilReadyReservationIfAny` | **Unit 14** | no-op, reports that nothing was fulfilled |
- * | `countOtherReservations` | — | **real**, see below |
+ * ## Why these live here and not in `reservations.ts`
  *
- * `withTransaction` is the reason these take a `session`: the caller is already inside a
- * transaction, and a hook that opened its own connection would write outside it.
+ * Both `circulation.ts` (issue, return, renew) and `reservations.ts` (fulfil, cancel,
+ * expire) need them, and `reservations.ts` already imports circulation. Putting the
+ * primitives in the service above would make the graph circular:
  *
- * `createFineIfLate` used to live here as a stub. It has moved to `services/fines.ts`,
- * because it is no longer a placeholder — and leaving a stub beside a real implementation
- * would invite someone to call the wrong one.
+ * ```
+ * reservations.ts -> circulation.ts -> hooks.ts -> reservations.ts
+ * ```
+ *
+ * JavaScript resolves that cycle at call time rather than import time, so it would mostly
+ * work — which is worse, not better, because it works until the day an import is hoisted
+ * into a `const` and the module body reads an uninitialised binding. This is the same
+ * reason `lib/services/refs.ts` exists: the shared thing goes in a leaf that depends only
+ * on models and settings, and both services depend on it.
+ *
+ * ## They take a `session`
+ *
+ * Every function here is called from inside a `withTransaction` block. A hook that opened
+ * its own connection would write *outside* that transaction, which is the exact failure
+ * the transaction exists to prevent.
  */
 
 /**
- * Offer the freed copy to the next member in the queue. **Unit 14 owns the queue.**
+ * How many copies are promised to **ready** reservations, per book.
  *
- * Called after every return, because a returned copy is the only event that can make a
- * waiting reservation ready (business rule 6).
+ * Rule 6: a `ready` reservation consumes one copy from public availability, because it is
+ * being held for a named member until `reservationHoldHours` expires. A catalog showing
+ * `availableCopies` would therefore promise a book that cannot be collected, which is the
+ * single most trust-destroying thing a library catalog can do.
+ *
+ * `waiting` reservations are deliberately **not** counted — they hold no copy yet.
+ *
+ * Moved here from `services/books.ts` in Unit 14, and given an optional `session`. It was
+ * being read from inside `issueLoan`'s transaction *without* the session, so the hold
+ * count was taken from outside the snapshot the rest of the transaction was reasoning
+ * about: a hold promoted by a concurrent return could be invisible to the issue that was
+ * supposed to respect it. Every caller inside a transaction now passes the session.
  */
-export async function promoteReservationQueue(
-  _bookId: Types.ObjectId,
-  _session: ClientSession,
-): Promise<void> {
-  // Unit 14: find the oldest `waiting` reservation when a copy is free, set
-  // `readyAt`/`expiresAt` from `reservationHoldHours`, and notify the member.
+export async function getReadyHoldCounts(
+  bookIds: Types.ObjectId[],
+  session?: ClientSession,
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (bookIds.length === 0) return counts;
+
+  const pipeline = [
+    { $match: { book: { $in: bookIds }, status: "ready" } },
+    { $group: { _id: "$book", holds: { $sum: 1 } } },
+  ];
+
+  const aggregate = Reservation.aggregate<{ _id: Types.ObjectId; holds: number }>(pipeline);
+
+  const rows = session ? await aggregate.session(session) : await aggregate;
+
+  for (const row of rows) counts.set(row._id.toString(), row.holds);
+  return counts;
 }
 
 /**
- * Consume the member's own ready hold when their book is issued. **Unit 14 owns holds.**
+ * Offer every free copy to the next member in the queue (business rule 6).
  *
- * Business rule 1: if the member has a `ready` reservation for this book, issuing the
- * book *is* that hold being collected, so the reservation must end up `fulfilled` and
- * linked to the loan rather than left dangling as a hold on a book they now have.
+ * Called after every return, after cancelling a `ready` hold, and after the expiry sweep —
+ * a returned copy is the only event that can make a waiting reservation ready.
  *
- * Returns whether a hold was consumed, so the caller can report it.
+ * **Free is `availableCopies - readyHolds`, not `availableCopies`.** Counting only the
+ * physical copies is the bug that would hand the same book to three people: the two copies
+ * already promised to named members are spoken for, and the queue has to see them as such.
+ *
+ * The loop cannot spin. Each iteration either promotes one hold — which raises `holds`, so
+ * the free count drops by one — or stops, and `holds` can never exceed `totalCopies`.
+ * Promoting several in one call is deliberate: a book returned from a bulk reshelving can
+ * free three copies at once, and the members who have been waiting longest are exactly the
+ * ones who should get them.
+ *
+ * Returns how many holds were promoted, so a caller can log or assert on it.
+ */
+export async function promoteReservationQueue(
+  bookId: Types.ObjectId,
+  session: ClientSession,
+): Promise<number> {
+  const book = await Book.findById(bookId).session(session).lean<BookDoc>();
+  if (!book || book.status !== "active") return 0;
+
+  const title = String(book.title);
+  const settings = await getSettings();
+
+  let holds = (await getReadyHoldCounts([bookId], session)).get(bookId.toString()) ?? 0;
+  let promoted = 0;
+
+  while (book.availableCopies - holds > 0) {
+    // `createdAt` then `_id` — the same order as the `reservation_fifo_queue` index, with
+    // `_id` breaking ties. Two holds made in the same millisecond otherwise have no
+    // defined order, and the same member would report a different position on each load.
+    const next = await Reservation.findOne({ book: bookId, status: "waiting" })
+      .sort({ createdAt: 1, _id: 1 })
+      .session(session);
+
+    if (!next) break;
+
+    const now = new Date();
+    next.status = "ready";
+    next.readyAt = now;
+    next.expiresAt = addHours(now, settings.reservationHoldHours);
+    await next.save({ session });
+
+    holds += 1;
+    promoted += 1;
+
+    await notify({
+      userId: next.member,
+      type: "reservation_ready",
+      title: "Your reserved book is ready",
+      message: `“${title}” is being held at the desk until ${format(next.expiresAt, "d MMM, HH:mm")}. Collect it before then and it is yours.`,
+      link: "/reservations",
+      session,
+    });
+  }
+
+  return promoted;
+}
+
+/**
+ * Consume the member's own ready hold when their book is issued (business rule 1).
+ *
+ * Issuing to a member who has a `ready` reservation for that book *is* that hold being
+ * collected, so the reservation must end up `fulfilled` and linked to the loan rather than
+ * left dangling as a hold on a book they now have at home — which would keep a copy
+ * permanently out of public availability.
+ *
+ * Returns whether a hold was consumed, so the caller can report and audit it.
+ *
+ * **No audit row here.** The caller is always `issueLoan`, which already writes
+ * `loan.issue` and records `fulfilledHold` in its metadata. Writing a second entry from
+ * here would give one collection two audit rows describing one event.
  */
 export async function fulfilReadyReservationIfAny(
-  _memberId: Types.ObjectId,
-  _bookId: Types.ObjectId,
-  _loanId: Types.ObjectId,
-  _session: ClientSession,
+  memberId: Types.ObjectId,
+  bookId: Types.ObjectId,
+  loanId: Types.ObjectId,
+  session: ClientSession,
 ): Promise<boolean> {
-  // Unit 14.
-  return false;
+  const ready = await Reservation.findOne({ book: bookId, member: memberId, status: "ready" }).session(
+    session,
+  );
+
+  if (!ready) return false;
+
+  ready.status = "fulfilled";
+  ready.fulfilledLoan = loanId;
+  await ready.save({ session });
+
+  return true;
 }
 
 /**
  * Live reservations **by other members** on a book, for the renewal rule.
  *
- * **Implemented for real, deliberately.** The spec calls this a stub, but a stub that
- * returned `0` would let a renewal through on exactly the book other members are queuing
- * for — silently breaking business rule 3, which blocks renewal when anyone is waiting.
- * A stub is only safe when its "no data" answer happens to be the permissive one, and
- * here the permissive answer is the wrong one.
+ * A member's own hold must not block their own renewal, hence the exclusion — otherwise a
+ * member who reserved, collected, and then tried to renew could never do it.
  *
- * The `Reservation` collection and its `{ book, status }` indexes have existed since
- * Unit 02, so this is a plain indexed count rather than a guess. What Unit 14 owns is the
- * *queue* — promotion, expiry, cancellation — not this existence check.
- *
- * `exceptMemberId` is the loan's own member: **their own hold must not block their own
- * renewal**, otherwise a member who reserved and then collected a book could never renew
- * it.
+ * Business rule 3 blocks renewal whenever anyone else is waiting, so this is the check
+ * that decides it and it is deliberately a real indexed count rather than a stub.
  */
 export async function countOtherReservations(
   bookId: Types.ObjectId,

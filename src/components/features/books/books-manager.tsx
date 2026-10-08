@@ -29,6 +29,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { BooksTable } from "@/components/features/books/books-table";
 import { BulkBar } from "@/components/features/books/bulk-bar";
+import { ReservationQueueSheet } from "@/components/features/reservations/reservation-queue-sheet";
 import { useBookFilters } from "@/hooks/use-book-filters";
 import { booksApi, categoriesApi, type BookListFilters, type BookSummary } from "@/lib/api-client";
 import { BOOK_SORTS, BOOK_SORT_LABELS } from "@/lib/constants";
@@ -142,6 +143,15 @@ const key = `${pathname}?${searchParams.toString()}`;
 
   const [archiving, setArchiving] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState<BookSummary | null>(null);
+
+  /**
+   * Which book's queue the sheet is showing (Unit 14).
+   *
+   * The row menu only knows the book, so the sheet is opened from here rather than from the
+   * menu — one piece of state owns "which sheet is open", which is the same reason
+   * `ConfirmDialog` is driven by the record it is about instead of a boolean.
+   */
+  const [queueBook, setQueueBook] = React.useState<BookSummary | null>(null);
 
   const toggleArchive = React.useCallback(
     async (book: BookSummary) => {
@@ -363,6 +373,7 @@ const key = `${pathname}?${searchParams.toString()}`;
               onEdit: (book) => router.push(`/staff/books/${book._id}/edit`),
               onToggleArchive: toggleArchive,
               onDelete: setConfirmDelete,
+              onViewQueue: setQueueBook,
             }}
             emptyState={
               isLoading ? (
@@ -437,6 +448,14 @@ const key = `${pathname}?${searchParams.toString()}`;
         consequence="This cannot be undone. A book that has ever been loaned cannot be deleted, and the library will offer to archive it instead."
         confirmLabel="Delete book"
         onConfirm={remove}
+      />
+
+      <ReservationQueueSheet
+        book={queueBook ? { id: queueBook._id, title: queueBook.title, slug: queueBook.slug } : null}
+        open={queueBook !== null}
+        onOpenChange={(open) => {
+          if (!open) setQueueBook(null);
+        }}
       />
     </div>
   );

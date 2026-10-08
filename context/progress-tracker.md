@@ -3,16 +3,144 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, and fines.**
-  Units 01–13 complete. Units 14 → 21 in progress per the developer's instruction to
+- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, and reservations.**
+  Units 01–14 complete. Units 15 → 21 to go, per the developer's instruction to
   complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 14 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- **Units 11–13 complete; Unit 14 (Reservations) is next** — `promoteReservationQueue` and
-  `fulfilReadyReservationIfAny` are still the documented no-ops in `lib/services/hooks.ts`.
+- Build Units 15 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- **Units 11–14 complete; Unit 15 (Wishlist & Reviews) is next** — the wishlist button on
+  the book detail page is the last control still labelled with the unit that owns it.
 
 ## Completed
+
+### Unit 14 — Reservations ✅ · `feat/14-reservations`
+- **The queue is live end to end.** A member reserves from the book detail page, a returned copy
+  promotes the longest-waiting hold, the hold counts down, a librarian fulfils it and the member
+  gets a loan — or collects one at the desk and the hold closes there instead.
+- **`promoteReservationQueue` and `fulfilReadyReservationIfAny` are real.** The Unit 11 stubs are
+  gone; both take a `session`, because they are called from inside `withTransaction` and a hook
+  that opened its own connection would write outside the transaction.
+  - **Free copies are `availableCopies - readyHolds`, not `availableCopies`.** Counting only the
+    physical copies is the bug that hands the same book to three people: two copies already
+    promised to named members are spoken for and the queue has to see them as such. The loop
+    promotes as many as there are free copies (a bulk reshelving frees three at once), and it
+    cannot spin, because each iteration either promotes a hold or stops.
+  - `fulfilReadyReservationIfAny` writes **no audit row**. The caller is `issueLoan`, which already
+    writes `loan.issue` and records `fulfilledHold` in its metadata; a second row would give one
+    event two audit entries.
+- **`lib/services/reservations.ts`** — `reserveBook`, `cancelReservation`, `fulfilReservation`,
+  `expireStaleReservations`, `listReservations`, `listMyReservations`, `getQueueInfo`,
+  `activeQueuePositions`, `hoursUntil`. Every policy number comes from `getSettings()` at request
+  time (invariant 7); there is no `3` or `48` literal in the file.
+- **The four reserve refusals are checked specific-before-general**, on the Unit 12 lesson:
+  *already have this on loan* → *already reserved* → *reservation limit* (both numbers) → *copies
+  are available, visit the desk*. A member who both holds the book and is looking at a free copy
+  satisfies two of the rules, and only the specific one tells them what to fix. The last check is
+  also the permissive one, so it is the last one — the other three are single indexed queries.
+- **`fulfilReservation` needed a real refactor, and MongoDB is why.** `reservations.ts` must import
+  `circulation.ts` (fulfilling issues a loan) while `circulation.ts` needs the queue primitives,
+  so putting those primitives in `reservations.ts` is a cycle. They went into `hooks.ts` as a
+  leaf, the same reason `refs.ts` exists — documented in `architecture.md` §Service layering.
+  And because **MongoDB has no nested transactions**, `circulation.ts` now exports
+  `issueLoanInSession`: `fulfilReservation` opens one transaction and calls the same code the desk
+  calls, every rule of business rule 1 intact. Calling the public `issueLoan` from inside a
+  transaction would either fail or commit the loan *outside* it, leaving the member with a book
+  and a hold still holding a copy out of the catalog.
+  - The defensive check afterwards is not belt-and-braces: if the hold did not close, the
+    transaction aborts and **nothing** is issued, rather than handing out a book that was never
+    actually being held for anybody.
+- **An automatic expiry writes no audit row, deliberately.** `logAudit` needs an actor and there
+  is none — the clock did it. Inventing a "system" user is exactly what Unit 13 got wrong on
+  `createFineIfLate`. The `ready → expired` state change plus the member's `reservation_expired`
+  notification is the record. `reservation.create` / `.cancel` / `.fulfil` **are** audited.
+- **The FIFO algorithm exists once.** `activeQueuePositions` (keyed by reservation id) replaced
+  the private copy in `members.ts` and serves the member record, the member's own page and the
+  staff register. The old helper returned only the positions of *one* member, so each new caller
+  would have needed its own — three copies of "where is this member in the queue" is three
+  answers.
+- **A `ready` hold is counted in the FIFO order but never numbered.** Three copies returned means
+  three holds at the head, so the first person still waiting is #4 — which is true, because three
+  people will be served before them. But a member whose copy is already set aside is not waiting
+  for a place, and giving them `#1` would label two members #1 on the same book. `queuePosition`
+  and `QueueEntry.position` therefore agree: non-null only while `waiting`.
+  - **This was found by a failing assertion, not by reasoning.** The first implementation stored a
+    number for every active hold and returned the index one higher, so the very first member to
+    reserve a book was told "You are #2 in line". The browser check caught it; the type documents
+    had not, because both said "a place in the queue" without saying whether a ready hold has one.
+- **`hoursUntilExpiry` is server-derived and rounded up.** The alternative is "0 hours left" while a
+  copy is still on the shelf with the member's name on it. It is exported and reused by
+  `members.ts` so the record tab and the member's own page cannot disagree about how long a hold
+  has left — two copies of a rounding rule is how a count-down disagrees with itself.
+- **`GET /api/reservations` `status` accepts a comma-separated list.** A single-value enum is not
+  enough for the staff History tab, which is three states and must be *one* paginated request: a
+  tab assembled from three calls is a lie the moment one of them fails. An unknown token is a 422
+  naming the valid values rather than an empty table.
+- **`GET /api/reservations/mine` returns the three groups already built**, with `pastTotal` beside
+  the capped `past`. Grouping in the client would drop rows the moment a member had more than one
+  page of history, which is what "Past" always is. It takes no member id and no filters at all —
+  the schema has neither, so editing the URL cannot reach somebody else's queue.
+- **Five routes**, all `handler()` → guard → zod → one service call. `/mine` resolves the member
+  from the session; `DELETE` authorises **in the service** (owner or staff, 403 otherwise)
+  because both are allowed and the reservation's own member is what tells them apart;
+  `POST /reservations` uses `requireActiveMember()` and `POST /reservations/:id/fulfil` uses
+  `requireStaff()`.
+- **`lib/validators/reservation.ts`** — shape only. No `.max(3)` on reservations: `maxReservationsPerMember`
+  and `reservationHoldHours` are read from Settings at request time (invariant 7), and a zod cap
+  would freeze the policy into the transport layer.
+- **`circulation.ts` reuses the queue primitives with a session now.** `getReadyHoldCounts` was
+  being read from inside `issueLoan`'s transaction *without* it, so the hold count came from
+  outside the snapshot the rest of the transaction was reasoning about — a hold promoted by a
+  concurrent return could be invisible to the issue that was supposed to respect it.
+- **`circulation.ts` no longer imports `books.ts`.** It imported it only for
+  `getReadyHoldCounts`, which now lives in the queue layer; `books.ts` re-exports it for
+  `withAvailability` and imports `getQueueInfo` back, so the graph stays acyclic.
+- **UI, member `/reservations`** — cards grouped **Ready / Waiting / Past**, not tabs. A tab that
+  says "Ready" with no number is a question the member has to click to answer, and the reason they
+  opened the page is almost always "is my book ready yet". A `ready` card is the only state with
+  a success tint, a countdown and a sentence about where to go; cancel opens a dialog that says
+  the copy goes to the next reader, not "are you sure?".
+- **UI, staff `/staff/reservations`** — tabs Ready / Waiting / History, desktop `<table>` and
+  stacked cards from **one array** with shared status-line and timeline helpers. **Only a `ready`
+  hold has a row menu**, because a `waiting` hold has no copy to issue and a closed one is
+  terminal; offering a control guaranteed to fail is worse than showing none.
+- **UI, book detail** — Reserve is live. Four states, each saying what the reader must do next: a
+  copy is on the shelf → *Borrow at the desk*; nothing held → *Reserve* plus the place they would
+  get; waiting → their live place and a working *Cancel*; ready → the success panel and the
+  server's countdown. `userState` gained `reservationId`, `reservationPosition` and
+  `readyHoldHours` so the page can cancel and count down **without a second request and without
+  a second implementation** of the FIFO or rounding rules.
+  - **`reservationId` is not optional polish.** The first version cancelled by `book._id`, which is
+    a 404 or — worse — cancels whatever hold that id happened to match. A control labelled "Cancel"
+    must actually cancel, not navigate to another page and ask there.
+- **UI, "View queue" sheet** on the books table row menu. It asks for `status=waiting,ready`
+  rather than every reservation the book ever had, because the question behind the menu is "who is
+  waiting for this?" and a year of cancelled holds would bury the answer. Present on every row,
+  including one with an empty queue — the sheet says "nobody is queuing" instead of leaving the
+  question unanswered.
+- **`lib/api-client.ts` gained `reservationsApi`** — `list`, `mine`, `reserve`, `cancel`, `fulfil`.
+- **Verified against the live local MongoDB: 74/74 API checks and 43/43 browser checks, 0 page
+  errors, 0 console errors, 0 unexpected failed requests**, at 390 / 768 / 1280 px in light and
+  dark. Every item on the spec's checklist is ticked below. `tsc`, `eslint` and `next build` clean;
+  all five routes and both pages present in the build output.
+  - **The queue, proved end to end**: two members queue for a two-copy book, one copy is returned,
+    and **exactly one** hold is promoted — the second member is still waiting. Issuing that copy to
+    a third member is refused with *"Every copy of … is on hold for another member"*, while the
+    member it is held for can still collect it, and collecting at the desk closes the hold as
+    `fulfilled` with `fulfilledLoanId` pointing at the loan.
+  - **Expiry**: a hold forced past its `expiresAt` moves to Past as `expired` on the next
+    `/mine`, and the member behind it is promoted with a **fresh 48-hour** window. The sweep moves
+    no copies — it only re-points holds.
+  - **Renewal is blocked** while another member waits, with the count in the sentence.
+  - **`effectiveAvailable` follows holds**: a two-copy book with one copy on loan and the other
+    held reads `0`, and drops back to `1` the moment the hold is cancelled.
+- **Deliberately not done:**
+  - **`reservation.expire` audit rows.** See above — there is no actor.
+  - **The maintenance job.** `runMaintenance()` is Unit 16. Expiry runs lazily inside `reserve`
+    and `/mine` instead, which is enough for correctness: a hold that is not closed is a copy that
+    stays invisible to the catalog.
+  - **Notifications are still a no-op.** All four reservation types are declared and the calls are
+    in place; `notify` becomes real in Unit 16.
 
 ### Unit 13 — Fines ✅ · `feat/13-fines`
 - **Fine lifecycle end to end**: raised on a late return, listed on both sides, collected or
@@ -448,24 +576,112 @@ tracker before this unit started.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **14** Reservations → **15** Wishlist & Reviews →
+1. **15** Wishlist & Reviews →
    **16** Notifications → **17** Dashboards → **18** Reports & Audit → **19** Settings →
    **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
-   - **Unit 13 is done — circulation's return path is live.** `createFineIfLate` has moved to
-     `lib/services/fines.ts`, creates the `Fine`, writes `loan.fineAmount`, and the return
-     dialog's "a fine was added" toast is now a real charge rather than a promise.
-   - **Unit 14 is next and unblocks the queue.** `promoteReservationQueue` and
-     `fulfilReadyReservationIfAny` are still no-ops in `lib/services/hooks.ts`, so a returned
-     copy is not offered to the member waiting for it and a collected hold is left dangling.
-     A returned book now has a fine attached to it, so the ready notification Unit 14 sends
-     should link to `/fines` as well as `/my-loans`.
-   - **The replica set question is answered** — the local `mongod` is now a single-node `rs0`
-     and transactions commit. See "Transactions now work" below. Do not build a
-     non-transactional fallback; the loud failure was the correct behaviour.
+   - **Unit 14 is done — the reservation queue is live.** `promoteReservationQueue` and
+     `fulfilReadyReservationIfAny` are real implementations in `lib/services/hooks.ts`, and
+     `GET /api/settings/public` already exposes `reservationHoldHours`, which Unit 16's
+     notification copy needs.
+   - **Unit 15 is next and is the last unwired control.** The wishlist button on the book
+     detail page still renders disabled with a `title` saying it opens in a later release.
+     `userState.wishlisted` is already computed and correct, so the toggle only needs the route,
+     the page and the heart animation.
+   - **Unit 16 can now be small.** `notify()` is called from seven places across circulation,
+     fines and reservations. All the call sites are in place and correct; what is missing is the
+     write, the bell and the page. Nothing has to be restructured.
    - `GET /api/members/lookup` and `loansApi.list` already serve the Unit 12 UI; do not
      build second versions. `getMemberUnpaidFineTotal` already serves the issue gate.
-   - `StatCard` now takes an optional `format`; Unit 17's money figures should pass one rather
+   - `StatCard` takes an optional `format`; Unit 17's money figures should pass one rather
      than letting `toLocaleString` render a currency amount as a bare number.
+
+### Unit 14 — spec checklist, ticked against the running app
+- [x] Cannot reserve while a copy is effectively available; can when all copies out or held.
+      *A two-copy book with one copy on loan and the other held reads `effectiveAvailable: 0` and
+      **is** reservable — the shelf copy is already spoken for, which is exactly the situation a
+      queue exists for. My first assertion had this backwards twice before I read the rule again.*
+- [x] Duplicate reservation and limit (3) rejected; active-loan duplicate rejected. *"You already
+      have … on loan"* names the specific mistake, not *"every copy is out"*.
+- [x] Returning the last copy promotes the oldest waiting reservation to `ready`; the copy is not
+      issuable to another member.
+- [x] Expired holds become `expired` and the next in line is promoted, with a fresh hold window.
+- [x] Staff fulfil issues the loan and marks the reservation `fulfilled`; member issue via the desk
+      also fulfils their ready hold. *Both were asserted against the database, not the response.*
+- [x] Renewal is blocked when someone is waiting.
+- [x] Catalog availability counts reflect holds, and the badge says *"None available"* rather than
+      *"All N out"* — with a hold, "all out" is false.
+- [x] Responsive; light/dark OK · no TypeScript or console errors · `npm run build` passes.
+
+### Unit 14 — bugs found by reading the screenshots
+Found the way Unit 07's truncated category names were found: **every assertion passed while all
+three of these were wrong**, because none of them looked at what a user would see.
+
+- **The staff register silently truncated itself at 50 rows with no pager and no note.** A
+  librarian with four hundred closed holds saw fifty and nothing saying three hundred and fifty
+  existed — the *"a capped list must say it is capped"* rule, already written down from the Unit 10
+  member record. Only the **History** tab is ever long, and it was invisible because the seeded
+  data had 22 rows. Added pagination plus a `Page 1 of 2 · showing 50 of 88` footer, and seeded 60
+  closed holds so the screen is exercised at a size that matters — with a handful of rows, both
+  the register and the member's Past section look complete whether or not they are.
+- **Book titles rendered as "No longer in the…"** in the register. `w-full` on a seven-column table
+  hands the slack to the narrow columns and starves the one a librarian actually reads. Fixed with
+  `min-w-[13rem]` — and that in turn **pushed the actions column out of the `overflow-hidden`
+  wrapper**, silently clipping the row menu, so the two date columns were merged into one two-line
+  "Dates" cell to buy the space back. Both facts are still shown, on vertical space the row already
+  had going spare. There is now a check on `table.scrollWidth` against the wrapper, because an
+  `overflow-hidden` table that outgrows its box clips the last column with nothing to indicate it.
+- **A placeholder book was still a link.** `bookRefOr` returns `slug: ""` for a missing book — a
+  real state, since a reservation outlives its book — and an empty slug produced `href="/catalog/"`,
+  landing a librarian on the catalog listing having asked for a book that is not there. Placeholders
+  now render as plain text, and there is a check for `a[href="/catalog/"]`.
+
+### Unit 14 — bugs found by the build and by reading the code
+- **`getReadyHoldCounts` was read from inside a transaction without the session.** `issueLoan`
+  asked "how many copies are promised to somebody else?" from outside the snapshot the rest of the
+  transaction was reasoning about, so a hold promoted by a concurrent return could be invisible to
+  the very issue that was supposed to respect it. `tsc`, `eslint` and `next build` all passed: the
+  parameter simply did not exist to be wrong.
+- **The first member to reserve a book was told they were "#2 in line".** `getQueueInfo` advanced
+  its counter *and then* added one. Found by the browser pass asserting on the rendered sentence,
+  and only because the harness asserted on the **place**, not on "a reservation exists".
+- **The queue position had two contradictory definitions.** `ReservationSummary.queuePosition`
+  returned a number for a `ready` hold and `QueueEntry.position` returned `null` for the same row —
+  two shapes for one concept, disagreeing. Both are now non-null only while `waiting`.
+- **`reservation.expire` would have needed a fabricated actor.** `logAudit` takes `actor`, and there
+  is no `system` role. Writing a row would have repeated the Unit 13 `createFineIfLate` mistake, so
+  the sweep writes no audit entry and the notification carries the fact instead.
+
+### Unit 14 — deliberately not done
+- **`reservation.expire` audit rows**, as above.
+- **Pagination on the member's `/reservations`.** It has none because the screen has no page
+  controls at all: `ready` and `waiting` are bounded by policy (at most `maxReservationsPerMember`
+  open holds) and `past` is capped with its total reported. A real pager would be a control that
+  can never be pressed.
+- **A prune for reservations whose book has been deleted.** The app cannot create that state —
+  `deleteBook` refuses while active holds exist — but earlier units' QA deleted books directly in
+  Mongo and left rows behind. They render honestly via `bookRefOr`. Cleaning them is a data
+  operation on the developer's database, not a code change, so it is reported rather than done:
+  see the Open Questions note.
+
+### Unit 14 — harness notes
+- **A fixture that violates a database rule is caught by the database, not by the pass.** The first
+  `QA Out Multi` fixture put two active loans on the same book for the same member and Mongo refused
+  the whole insert with `E11000 … loan_one_active_per_member_book`. That is business rule 1 working
+  exactly as designed; the two copies had to go to two different members.
+- **A document written by the app looks nothing like a document written by a fixture.** Filtering
+  for the `__qa14` flag found nothing, because holds created *through the API* during the pass carry
+  no flag — the same lesson as Unit 08's leftover books. Scope a cross-cutting query by a real
+  field (the member id), not by the fixture marker.
+- **JSON still does not survive a PowerShell argument**, and `-Compress` makes it worse:
+  `{ok:true}` rather than `{"ok":true}`. Pass fixtures as a **file path** and let each harness
+  `readFileSync` it.
+- **`node file.js` with top-level `await` needs `.mjs`** when the QA folder's `package.json` has no
+  `"type": "module"`.
+- **A harness must report what already passed when it crashes.** The first crashing version printed
+  only the stack trace, which threw away every check that had run and cost a full debugging cycle.
+  The report moved into a `.finally()`.
+- **Seed the volume the feature has to handle.** Every capped-list bug in this project was invisible
+  because the fixtures were smaller than the cap.
 
 ### Unit 12 — bugs found by the developer using the page
 Reported as "all four tabs are broken and I cannot issue a book". **Two entirely different
@@ -1121,56 +1337,69 @@ hard-coded.
   rather than showing a button that does nothing.
 
 ## In Progress
-- Unit 13 — Fines. Not started. `createFineIfLate` (the Unit 11 stub) is the first thing to
-  fill in, then `POST /api/fines/:id/collect` and `/waive`, the staff Fines page and the
-  member Fines page.
-  - `Fine.loan` is **unique**, so one fine per loan — a second return cannot double-charge,
-    and a duplicate is an `E11000` that `handler` already maps to a 409.
-  - `unpaid → paid | waived` are terminal; neither may transition again.
-  - `fineBlockThreshold` is deliberately **not** in the public settings subset, so the
-    client cannot pre-judge whether a member is blocked. The server says so.
-  - Circulation is now testable, so this unit **can** be verified end to end.
+- Unit 15 — Wishlist & Reviews. Not started. The `Wishlist` model, its `{member, book}` unique
+  index and `userState.wishlisted` all exist; the heart button on the book detail page is the last
+  control in the app still disabled with a `title` naming the unit that opens it.
+- Unit 14 — Reservations. Complete and verified. See above.
 
 ## Open Questions
+- **The local dev database holds orphaned reservations** — roughly 30 rows whose `book`, and in
+  several cases whose `member`, no longer exists. They are left by Units 08–13's QA deleting
+  books and users **directly in Mongo**, which bypasses `deleteBook`'s refusal to remove a book with
+  active holds. The app renders them honestly ("No longer in the catalog", "Unknown member"), and
+  they make `/staff/reservations` look like a screen full of failures. **Not cleaned**: it is an
+  irreversible delete on the developer's data, so it is reported rather than done. One line clears
+  them if wanted — `db.reservations.deleteMany({ book: { $nin: db.books.distinct("_id") } })` —
+  but the developer's call.
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
 - Default currency (default USD, editable in Settings).
-- `MONGODB_URI` already points at a running **local** MongoDB, now converted to a
-  single-node replica set (`rs0`) so circulation transactions commit. **`mongod.cfg` lives
-  outside the repo**, so another machine is standalone again and circulation will 500 there —
-  the setup steps must go in the README before Unit 21. Every non-transactional unit was
-  verified against a real database; Units 11 and 12 are verified too.
+- `MONGODB_URI` already points at a running **local** MongoDB, converted to a single-node replica
+  set (`rs0`) so circulation transactions commit. **`mongod.cfg` lives outside the repo**, so
+  another machine is standalone again and circulation will 500 there — the setup steps must go in
+  the README before Unit 21. Every unit has now been verified against a real database, Units 11–14
+  including their transactions.
+- **A dev server was already running on port 3000 when Unit 14 started.** It was healthy and
+  connected, so the pass reused it rather than starting a second one — two `next dev` processes in
+  one project fight over the Turbopack cache, and deleting `.next` under a live server makes every
+  route look like a 404. It then exited on its own mid-session and a fresh one was started. The
+  session notes still hold: **check port 3000 before starting anything.**
 - Confirmed against the spec: **suspended members may still edit their profile and avatar.**
   `architecture.md` §Auth & Access Model says "Wishlist and profile edits remain allowed", and
   `requireActiveMember()` is reserved for reserve / renew / issue. `PATCH /api/profile` therefore uses
   `requireSession()`, not `requireActiveMember()` — intentional, not an oversight.
+  - **A suspended member keeps their place in a queue.** `GET /api/reservations/mine` uses
+    `requireSession()`, not `requireActiveMember()`: being suspended stops them borrowing, not
+    reading. They cannot *join* one (`POST` uses `requireActiveMember`), which is the rule.
 - The project has **no test files**. `project-overview.md` scopes automated suites out, but Units 06 and 07
   each found bugs that any test would have caught (broken signature, avatar never persisted, PATCH wiping
-  icon and colour). Worth revisiting at Unit 21.
+  icon and colour), and Unit 14 found two more that only reading a screenshot caught. Worth revisiting
+  at Unit 21.
 - The browser QA harness lives outside the repo in `%LOCALAPPDATA%\Temp\opencode\qa` (puppeteer-core plus
   the installed Chrome), so no QA dependency is added to the project. Unit 08 added `bootstrap08.mjs`
   (fixtures), `books-api.mjs` (73 checks), `books-page.js` (129 checks), `books-audit.mjs` and
-  `run-unit08.ps1`.
+  `run-unit08.ps1`. **Unit 14 added `bootstrap14.mjs`, `reservations-api.mjs` (74 checks),
+  `holds-page.mjs` (43 checks) and `run-unit14-existing.ps1`** — the last reuses whatever dev server
+  is already healthy instead of starting one.
 - **Fixtures must be data the app would actually accept.** A made-up ISBN in a seed document does not
   fail loudly; it makes the *form* the thing under test, and the pass then reports a save failure instead
   of a fixture mistake. All fixture ISBNs are checksum-valid, and are verified as such.
-- **Fixtures must not leak between runs.** Books created *through the app* carry no `__qa` flag, so
-  deleting only flagged documents let them accumulate; a stray title sorted ahead of `Kindred` and failed
-  an alphabetical assertion that was actually correct. `bootstrap08.mjs` deletes by `__qa`, by
-  `addedBy ∈ QA users`, and by a `^QA` title prefix.
-- **The local database is nearly empty of activity.** As of this unit it holds 2 members,
-  34 books, **2 loans, 0 fines and 1 reservation**, and only one of the two members has any
-  history at all. Every screen that renders loans, fines or reservations will therefore look
-  empty for most accounts, which reads as "broken" rather than "no data yet". Before browser QA
-  on any of those screens, seed realistic activity (an overdue loan, a paid fine, a waived fine,
-  a ready hold) or you are testing the empty state and calling it a pass.
-  - The QA member with the history is `Mia Member` / LIB-2026-9001; the developer's own account
-    has none.
-  - `qa.admin@athenaeum.test` was rotated to a fresh password during this unit's verification
-    (value deliberately not recorded here). `make-admin.mjs` takes the password as an argument.
-- **JSON does not survive a PowerShell argument** — `{a:"b"}` arrives as `{a:b}`. Pass structured data
-  through `$env:` instead.
-- **`$env:` does not persist between tool calls.** Re-seed the fixtures *and* re-export `QA_FIX` in the
-  same command as the test that needs it, or the fixture ids will not match the database.
+- **Fixtures must not leak between runs**, and **a fixture written by the app carries no fixture flag.**
+  Books created *through the app* have no `__qa` marker, so deleting only flagged documents let them
+  accumulate; a stray title sorted ahead of `Kindred` and failed an alphabetical assertion that was
+  actually correct. `bootstrap08.mjs` deletes by `__qa`, by `addedBy ∈ QA users`, and by a `^QA` title
+  prefix. `bootstrap14.mjs` tags `__qa14` and deletes by it, and asserts on **member ids** rather than
+  the flag wherever a query crosses into app-written rows.
+- **The local database is nearly empty of activity.** As of this unit it holds 43 books, 2–3 members with
+  no history, and ~90 closed reservations, most of them orphaned (see above). Every screen that renders
+  loans, fines or reservations will therefore look empty for most accounts, which reads as "broken"
+  rather than "no data yet". Before browser QA on any of those screens, seed realistic activity (an
+  overdue loan, a paid fine, a waived fine, a ready hold) or you are testing the empty state and
+  calling it a pass.
+- **JSON does not survive a PowerShell argument** — `{a:"b"}` arrives as `{a:b}`, and
+  `ConvertTo-Json -Compress` makes it worse by dropping the key quotes. **Pass structured data as a
+  file path** and read it inside the harness.
+- **`$env:` does not persist between tool calls.** Re-seed the fixtures *and* re-export the fixture
+  reference in the same command as the test that needs it, or the ids will not match the database.
 
 ## Architecture Decisions
 - Next.js 16 App Router (scaffold) + Mongoose 9 + Cloudinary signed uploads + jose JWT cookie sessions.
@@ -1292,6 +1521,48 @@ hard-coded.
 - **Count calendar days, not 24-hour periods, wherever money depends on it.** A book due at
   23:00 yesterday and returned at 01:00 today is one day late. Whole 24h blocks charged
   nothing for it, and `daysOverdue × ratePerDay` followed the wrong number.
+- **Round a countdown *up*, and derive it on the server.** `hoursUntilExpiry` exists because the
+  alternative is "0 hours left" while a copy is still on the shelf with the member's name on it.
+  Deriving it on the server also means one rounding rule: the member's page, the record tab and
+  the register cannot disagree, and no component re-implements it.
+- **A `ready` hold is counted in the FIFO order but never numbered.** Three copies returned means
+  the first person still waiting is #4 — true, because three people are served before them. But a
+  member whose copy is already set aside is not waiting for a place, and giving them `#1` labels
+  two members #1 on the same book. Two shapes for one concept with different nullability is how a
+  register and a sheet disagree about the same row; both now use the same helper and the same rule.
+- **MongoDB has no nested transactions, so a service that opens its own must expose the body.**
+  `issueLoan` / `issueLoanInSession` are the pair. Anything else that needs to issue *inside* an
+  existing transaction (Unit 14's fulfil is the first) would otherwise either fail or — far worse —
+  commit outside the caller's transaction, leaving the invariant the transaction exists to enforce
+  quietly unenforced.
+- **Put the shared primitives in a leaf, not in the service that reads most naturally.** The queue
+  mechanics could not live in `services/reservations.ts` because `circulation.ts` needs them and
+  `reservations.ts` needs `circulation.ts`. `hooks.ts` is the leaf, for the same reason `refs.ts`
+  is. Cycles in a service graph resolve at *call* time in ESM, so they mostly work — which is
+  worse than failing, because they work until a `const` is hoisted and read at module scope.
+- **A hook called from inside a transaction must take the session.** `getReadyHoldCounts` was read
+  from `issueLoan` without one, so the hold count came from outside the snapshot the rest of the
+  transaction was reasoning about: a hold promoted by a concurrent return could be invisible to the
+  very issue meant to respect it. Nothing catches a missing parameter.
+- **An automatic action has no actor, so it writes no audit row.** Inventing a `"system" as never`
+  is what Unit 13 got wrong on `createFineIfLate`. The state change plus the member's notification
+  is the record; invariant 11 does not list expiry.
+- **An empty `slug` is a signal, not a value.** `bookRefOr` returns `slug: ""` for a book that is
+  gone, and a reservation genuinely outlives its book. Rendering that as `<Link href={`/catalog/${slug}`}>`
+  produces `/catalog/` — a different page. Placeholders render as text.
+- **A capped list must say it is capped *and* offer a way past the cap.** `meta.total` beside a
+  one-page `items` array is what tells you; `items.length` can never tell you. This bit the staff
+  register at exactly 50 rows and was invisible because the fixtures held 22 — seed the volume the
+  feature has to handle.
+- **A `w-full` table hands its slack to the narrowest columns and starves the one a human reads.**
+  Fixed with `min-w` on the book column, which then over-corrected and pushed the actions column
+  out of an `overflow-hidden` wrapper — silently clipping the row menu. **Assert
+  `table.scrollWidth` against the wrapper's `clientWidth`**: an `overflow-hidden` table that
+  outgrows its box clips the last column with nothing to indicate it.
+- **A comma-separated `status` filter beats three requests for one tab.** A tab assembled from
+  three calls is a lie the moment one of them fails; omitting the filter is unbounded.
+- **Pass fixtures to a harness as a file path, not as JSON in an argument.** PowerShell strips the
+  double quotes, and `ConvertTo-Json -Compress` strips them too.
 - **Hooks called inside a transaction must take the `session`.** A stub that opened its own
   connection would write outside the transaction, which is the failure the transaction
   exists to prevent.
@@ -1419,6 +1690,11 @@ hard-coded.
   - Unit 09 adds `app/(public)/` (catalog + detail) alongside the app shell. The two
     coexist: `(public)` renders no `AppShell`, so a visitor never sees staff or member
     navigation.
+- `feat/10-members-team` — Unit 10.
+- `feat/11-circulation` — Unit 11.
+- `feat/12-circulation-ui` — Unit 12.
+- `feat/13-fines` — Unit 13.
+- `feat/14-reservations` — Unit 14.
 
 ## First Admin Account
 Unit 07 needed a librarian to verify with, and the register endpoint only ever creates a member by design,
@@ -1436,12 +1712,15 @@ committed. Sign in with it to reach `/staff/*`; a member is silently redirected 
   and makes the delete fail — find it with
   `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` and stop the ones whose `CommandLine` matches
   `*next*`.
+- **Check port 3000 *before* deleting `.next` or starting a server, every time.** If something is
+  already listening and healthy, **run the QA pass against it** — `run-unit14-existing.ps1` does exactly
+  this. Two `next dev` processes in one project fight over the Turbopack cache, and a second `.next` build
+  breaks the first server's pages in ways that read as routing bugs.
 - **Never delete `.next` while a dev server is already running** — including the developer's own, outside this
   session. The process keeps the port but stops answering, so the browser shows the **404 page** on every
   route while `curl` reports a refused connection and Windows still lists port 3000 as `Listen`. That
-  combination looks exactly like a routing bug and is not one. Check first with
-  `Get-NetTCPConnection -LocalPort 3000 -State Listen`, and if something is there, leave it alone.
-  The QA scripts in `%LOCALAPPDATA%\Temp\opencode\qa` now abort with exit code 2 in that case.
+  combination looks exactly like a routing bug and is not one. The QA scripts now abort with exit code 2 in
+  that case.
 - **A 404 page's text appears in *every* page's HTML**, because `not-found.tsx` ships in the shared client
   payload. Asserting `"This shelf is empty" in html` is therefore not a 404 test — assert on the route's own
   markers (`name="email"`, `<h1>Welcome back</h1>`) instead.
@@ -1466,8 +1745,11 @@ committed. Sign in with it to reach `/staff/*`; a member is silently redirected 
 - Browser QA harness lives in `%LOCALAPPDATA%\Temp\opencode\qa` (puppeteer-core + the installed Chrome) so
   no QA dependency is added to the project.
 - **Read the screenshots.** Every assertion passed on the Unit 07 pass that first revealed the truncated card
-  names and the mojibake. Assert on what a user would notice — text clipping, encoding, contrast, an
-  unreachable control — not only on presence and count.
+  names and the mojibake, and again on the Unit 14 pass that revealed a register truncating itself at 50 rows,
+  a book column starved to "No longer in the…", and a clipped actions menu. Assert on what a user would
+  notice — text clipping, encoding, contrast, an unreachable control — not only on presence and count.
+- **A `line-clamp` element reports its own truncation:** `scrollWidth > clientWidth`. Measure it rather than
+  eyeballing a screenshot, and assert the same way.
 - **Assert on the destination, never on a substring of the URL.** `url.includes("/login")` passes for
   `/login%3Fnext%3D…`, which is a 404. That is how a completely broken redirect survived a whole unit.
 - **A page that renders a confident empty state is the most expensive kind of bug.** "No books yet ·

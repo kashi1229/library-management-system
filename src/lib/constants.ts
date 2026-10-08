@@ -121,6 +121,19 @@ export type ReservationStatus = (typeof RESERVATION_STATUSES)[number];
 export const ACTIVE_RESERVATION_STATUSES = ["waiting", "ready"] as const satisfies readonly ReservationStatus[];
 export type ActiveReservationStatus = (typeof ACTIVE_RESERVATION_STATUSES)[number];
 
+/**
+ * Is this reservation still holding a place in a queue?
+ *
+ * A typed guard rather than a raw `includes` at each call site, because
+ * `ACTIVE_RESERVATION_STATUSES` is a two-element readonly tuple and TypeScript will not
+ * let `status: ReservationStatus` be tested against it directly — so the alternative is a
+ * cast at every site, and a cast is exactly how "is this still active?" quietly becomes
+ * wrong after someone adds a status.
+ */
+export function isActiveReservationStatus(status: string): status is ActiveReservationStatus {
+  return (ACTIVE_RESERVATION_STATUSES as readonly string[]).includes(status);
+}
+
 export const FINE_STATUSES = ["unpaid", "paid", "waived"] as const;
 export type FineStatus = (typeof FINE_STATUSES)[number];
 

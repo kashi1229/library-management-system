@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, MoreHorizontal, Pencil, RotateCcw, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,6 +16,14 @@ export type BookRowActions = {
   onEdit: (book: BookSummary) => void;
   onToggleArchive: (book: BookSummary) => void;
   onDelete: (book: BookSummary) => void;
+  /**
+   * Open the book's reservation queue (Unit 14).
+   *
+   * Present on **every** row, including one with an empty queue: a librarian checking
+   * whether a title is oversubscribed should not have to know in advance, and the sheet says
+   * "nobody is queuing" rather than leaving the question unanswered.
+   */
+  onViewQueue: (book: BookSummary) => void;
 };
 
 /**
@@ -66,6 +74,11 @@ export function BookRowActionMenu({
             <Archive className="size-4" strokeWidth={1.75} aria-hidden="true" />
           )}
           {archived ? "Restore to catalog" : "Archive"}
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onSelect={() => actions.onViewQueue(book)}>
+          <Users className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          View queue
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />

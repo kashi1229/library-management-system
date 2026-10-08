@@ -3,6 +3,8 @@ import { Types } from "mongoose";
 import { AppError } from "@/lib/api";
 import { Book, Category, Loan, Reservation, Wishlist } from "@/models";
 import { logAudit } from "@/lib/services/audit";
+import { getQueueInfo, hoursUntil } from "@/lib/services/reservations";
+import { getReadyHoldCounts } from "@/lib/services/hooks";
 import { destroyAsset } from "@/lib/cloudinary";
 import { slugify } from "@/lib/validators/category";
 import {
@@ -214,32 +216,15 @@ function buildQuery(query: ListBooksQuery) {
 /**
  * How many copies are promised to **ready** reservations, per book.
  *
- * Rule 6: a `ready` reservation consumes one copy from public availability, because
- * it is being held for a named member until `reservationHoldHours` expires. Showing
- * `availableCopies` in the catalog would therefore promise a book that cannot be
- * collected, which is the single most trust-destroying thing a library catalog can
- * do.
+ * Re-exported from `lib/services/hooks.ts`, where the queue mechanics live. The original
+ * lived here as a forward-looking read written in Unit 09; now that Unit 14 has arrived it
+ * is a real, session-aware count, and keeping a second home for it would be two answers to
+ * "how many copies are promised" — the exact drift that made catalog cards read "NaN
+ * available" in Unit 09. `circulation.ts` used to import it from here for the same reason.
  *
- * Implemented for real rather than stubbed: the reservation collection already
- * exists, the query is one round trip, and returning zeros would mean Unit 14 had
- * to remember to come back and fix a number the catalog already displays.
- *
- * `waiting` reservations are deliberately **not** counted — they hold no copy yet.
+ * See `getReadyHoldCounts` there for why free copies are `availableCopies - readyHolds`.
  */
-export async function getReadyHoldCounts(
-  bookIds: Types.ObjectId[],
-): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
-  if (bookIds.length === 0) return counts;
-
-  const rows = await Reservation.aggregate<{ _id: Types.ObjectId; holds: number }>([
-    { $match: { book: { $in: bookIds }, status: "ready" } },
-    { $group: { _id: "$book", holds: { $sum: 1 } } },
-  ]);
-
-  for (const row of rows) counts.set(row._id.toString(), row.holds);
-  return counts;
-}
+export { getReadyHoldCounts };
 
 /**
  * Attach `effectiveAvailable` to a page of books.
@@ -383,6 +368,12 @@ export async function getBook(idOrSlug: string): Promise<BookDetail> {
  * `queueLength` (how many people are ahead of you), and `userState` (what *this*
  * signed-in member has in flight).
  *
+ * **The queue comes from one read.** `getQueueInfo` returns `queueLength`, the signed-in
+ * member's own place, and the ordered queue together, so the "3 people waiting" badge and
+ * "you're #4" cannot be describing two different moments. This used to be an unordered
+ * `Reservation.find`, which was enough for a count and would not have been enough for a
+ * position — and a position computed from an unordered read is a coin flip.
+ *
  * `userState` is computed from the session user id only — never from anything the
  * client sent (invariant 3) — and `requireSession()` has already run in the route,
  * so an anonymous caller simply gets the neutral `ANONYMOUS_STATE`.
@@ -393,21 +384,20 @@ export async function getCatalogBook(
 ): Promise<CatalogBookDetail> {
   const book = await findBook(idOrSlug);
   const lean = book.toObject() as unknown as Record<string, unknown>;
+  const bookId = book._id as Types.ObjectId;
 
-  const [categories, reservations, wishlisted, activeLoan] = await Promise.all([
+  const [categories, queue, wishlisted, activeLoan, holds] = await Promise.all([
     categoryMap([book.category as Types.ObjectId]),
-    Reservation.find({ book: book._id, status: { $in: ["waiting", "ready"] } })
-      .select("member status")
-      .lean<Array<{ member: Types.ObjectId; status: string }>>(),
+    getQueueInfo(String(bookId), userId),
     userId
-      ? Wishlist.exists({ member: userId, book: book._id })
+      ? Wishlist.exists({ member: userId, book: bookId })
       : Promise.resolve(false),
-    userId ? Loan.exists({ book: book._id, member: userId, status: "active" }) : Promise.resolve(false),
+    userId ? Loan.exists({ book: bookId, member: userId, status: "active" }) : Promise.resolve(false),
+    getReadyHoldCounts([bookId]),
   ]);
 
-  const mine = userId ? reservations.find((r) => String(r.member) === String(userId)) : undefined;
   const summary = toApi(lean, categories.get(String(book.category)) ?? null);
-  const holds = await getReadyHoldCounts([book._id as Types.ObjectId]);
+  const mine = queue.entries.find((entry) => entry.member.id === userId?.toString());
 
   return {
     ...summary,
@@ -415,13 +405,21 @@ export async function getCatalogBook(
       summary.totalCopies,
       Math.max(0, summary.availableCopies - (holds.get(summary._id) ?? 0)),
     ),
-    // Everyone in the queue, not "everyone except you". A reader needs to know how
-    // long the wait is, and the hold they are already in counts as position one.
-    queueLength: reservations.length,
+    // Everyone in the queue, not "everyone except you". A reader needs to know how long the
+    // wait is, and a hold they are already in counts as position one.
+    queueLength: queue.queueLength,
     userState: {
       wishlisted: Boolean(wishlisted),
       activeLoan: Boolean(activeLoan),
-      reservation: (mine?.status as UserBookState["reservation"]) ?? null,
+      reservation: (mine?.status ?? null) as UserBookState["reservation"],
+      reservationId: mine?.id ?? null,
+      reservationPosition: queue.position,
+      // The reader's own countdown, by the one rounding rule in the reservation service.
+      // `null` unless their hold is actually `ready` — a `waiting` member has no window.
+      readyHoldHours:
+        mine?.status === "ready" && mine.expiresAt
+          ? hoursUntil(new Date(mine.expiresAt), new Date())
+          : null,
     },
   };
 }
@@ -431,6 +429,9 @@ export const ANONYMOUS_USER_BOOK_STATE: UserBookState = Object.freeze({
   wishlisted: false,
   activeLoan: false,
   reservation: null,
+  reservationId: null,
+  reservationPosition: null,
+  readyHoldHours: null,
 });
 
 /**
