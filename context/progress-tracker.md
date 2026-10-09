@@ -3,18 +3,125 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, reservations, and wishlist/reviews.**
-  Units 01–15 complete. Units 16 → 21 to go, per the developer's instruction to
-  complete the application rather than pause for review per unit.
+- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, reservations, wishlist/reviews.**
+  Units 01–15 complete. **Unit 16 in progress** (see the WIP section below). Units 17 → 21 to go.
 
 ## Current Goal
-- Build Units 16 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- **Unit 16 (Notifications) is next**, and the tracker has said for three units that it can
-  now be small: `notify()` is already called from seven places across circulation, fines and
-  reservations, and all the call sites are correct. What is missing is the write itself, the
-  bell and the page.
+- Build Units 17 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- **Unit 16 is committed as WIP with one known defect** — `POST /api/maintenance/run`
+  intermittently aborts its transaction. The fix is to finish; see the WIP section for exactly
+  what has been narrowed down and what has not.
+- **Unit 17 (Dashboards) can start on what is already here**: `StatCard` takes an optional
+  `format`, `GET /api/settings/public` exists, and `runMaintenanceIfDue()` already runs from the
+  staff layout.
 
 ## Completed
+
+### Unit 16 — Notifications & Maintenance · `feat/16-notifications` 🚧 **WIP — one known defect**
+**Status: committed incomplete on the developer's instruction, so Unit 17 can proceed.** Not
+verified end to end. `tsc`, `eslint` and `next build` are clean; the browser pass was at 29/29
+before the maintenance transaction was touched. **Do not treat the maintenance job as working.**
+
+- **Known defect — `POST /api/maintenance/run` intermittently 500s** with
+  `MongoServerError: Transaction with { txnNumber: N } has been aborted`.
+  - **Narrowed to:** the interaction between `claimRun`'s conditional write to the `settings`
+    document and `getSettings()`'s **upsert** — which also writes `settings` — being called
+    from inside `promoteReservationQueue`, which runs inside the expiry transaction. Two writes
+    to one document inside one transaction.
+  - **Not proved.** A faithful reimplementation of the expiry sequence commits fine against the
+    local replica set, and the raw `settings` upsert inside a transaction commits fine. So the
+    hypothesis is not yet confirmed, and **two attempts to fix it were wrong**: one edited a dev
+    server that was running stale code (it never picked the change up and produced a 500 that
+    looked like a new bug), and one only added a comment without changing any behaviour. The
+    lesson is in the code comment at `hooks.ts` §`promoteReservationQueue`, but the fix itself
+    is not done.
+  - **Next step, concretely:** make `promoteReservationQueue` read `reservationHoldHours`
+    **without** the upsert — a plain `Setting.findOne(...).select(...)` — or pass the hold hours
+    in from the caller, which maintenance already reads outside any transaction. That removes
+    the second write to `settings` from inside the transaction and is the most likely fix.
+- **`lib/services/notifications.ts` — the real `notify()`, plus `listNotifications`,
+  `getLatestForPopover`, `getUnreadCount`, `markRead`, `markAllRead`.**
+  - **`notify` never throws into its caller.** A notification is a courtesy about an event that
+    already happened; a duplicate is the *expected* result of a re-run, not an error.
+  - **The spec says "swallow duplicate-key errors from `dedupeKey`", and that instruction cannot
+    be followed inside a transaction — so it was deliberately not followed, and the reason is
+    recorded in the code.** MongoDB aborts the whole transaction on *any* write error, so
+    catching `E11000` and returning normally leaves the caller inside a transaction that is
+    already dead: every later write fails with *"Transaction has been aborted"* and the commit
+    fails too. A "handled" duplicate therefore silently destroys the rest of the unit of work.
+    **Reproduced directly against the local replica set** before the change: one duplicate
+    insert, then a normal insert in the same transaction — the second one throws.
+    - So a `dedupeKey` is now **read before the insert**, in the caller's session so it sees the
+      same snapshot. The unique index stays as the guarantee, and the `E11000` catch is retained
+      for the concurrent-insert race, where there is no transaction to poison.
+  - **`comment`-style care: `dedupeKey` is omitted, never `null`.** The index is **sparse**, and
+    a stored `null` is a value — every one-off notification would collide with every other.
+  - **`unreadCount` is counted over the whole inbox, not the page.** A badge that counts only the
+    twelve rows on screen reads "3 unread" while the member has eleven, and the number on the
+    bell is the number they will believe.
+  - **`markRead` is scoped by `{ _id, user }`.** The id alone is not authorisation. "Does not
+    exist" and "not yours" are deliberately the same answer, because distinguishing them tells a
+    prober which ids are real.
+- **`lib/notification-templates.ts` — icon and tone per type, as a total `Record`.** Adding a
+  type to `NOTIFICATION_TYPES` without drawing it here is a **compile error**, not a blank tile
+  (the `CATEGORY_ICON_NAMES` argument from Unit 07). Client-safe by design: no `server-only`, no
+  mongoose — the Unit 10 lesson about a client-safe/server split.
+  - **The spec's template map for the *copy* was deliberately not built**, and the reasoning is
+    in the file. The copy is written at each call site because that is where the values are:
+    `fines.ts` has `daysOverdue` and `amount`, `hooks.ts` has `expiresAt`. A builder map turns
+    *"“Kindred” was returned 4 days late. You owe $20.00."* into a function taking fifteen
+    named arguments — the same words with more indirection. The drift that matters is two call
+    sites wording the same event differently, which a map does not prevent either.
+- **Routes**: `GET /api/notifications`, `POST /api/notifications/:id/read`,
+  `POST /api/notifications/read-all`, `POST /api/maintenance/run`.
+  - **`requireSession()` throughout, not `requireActiveMember()`.** A suspended member may still
+    read, and the notification they were sent — including the notice that they were suspended —
+    is part of that.
+  - **There is no member id in any notification payload or query**, so editing the URL cannot
+    reach somebody else's inbox.
+  - **`mark-all-read` is one `updateMany`, not a loop** — the inbox is the one collection a
+    member can legitimately accumulate unboundedly.
+- **`POST /api/maintenance/run` — admin session *or* `x-cron-secret`, decided independently.**
+  The role check runs **first**, so a signed-in member cannot be upgraded by adding a header.
+  `getSession()` rather than `requireAdmin()` because the two callers are alternatives, not a
+  sequence: an unauthenticated cron request must not fail as "not signed in" before the secret
+  is considered.
+  - **`isValidCronSecret` uses `timingSafeEqual`, not `===`** (`lib/cron-secret.ts`) — a plain
+    comparison returns at the first differing character and leaks how much of a guess was right.
+    **Absent is not "allow"**: with no `CRON_SECRET` the secret path is closed, leaving only the
+    admin session, because "unset means no check" is how an unauthenticated maintenance endpoint
+    reaches production.
+  - **The cron path writes no audit row.** There is no user, and inventing a "system" actor is
+    the mistake Units 13 and 14 made on the automatic fine and the automatic hold expiry.
+- **Throttling is claimed before the work, with a conditional update**, so exactly one caller
+  wins and the losers report `skipped: true` rather than failing. Also `runExclusive`, a
+  module-level promise chain, because the settings claim cannot stop two requests *inside one
+  Node process* from overlapping — and the staff layout fires a sweep on every page load, so that
+  happens constantly. **Both mechanisms are needed and neither is sufficient alone**, which is
+  worth writing down because "it has a throttle" sounds like the whole story.
+- **`NotificationBell`** — 60s `refreshInterval` (SWR already knows how to poll; a hand-rolled
+  interval keeps fetching after the tab closes), count over the whole inbox, and a 0.7s shake
+  when the count rises. **The shake is explicitly disabled under `prefers-reduced-motion`** while
+  the badge remains, because the information must not depend on the motion being seen.
+  - **The badge is `aria-hidden`** — the count is already in the trigger's label, and announcing
+    it twice makes a screen reader say the number as two separate items.
+- **`/notifications`** — All / Unread tabs, **grouped by day** (Today / Yesterday / dated), with
+  the year dropped only for the current year. Clicking a row marks it read *and* navigates, and
+  the mark is optimistic so the row dims immediately rather than after a round trip.
+  - **The row is a `<button>`, not a link**, because mark-read is part of the action and an
+    `<a>` cannot promise it.
+- **Staff fan-out on reserve** — every librarian is notified that a book is being waited for,
+  once per book per day. Notifying one named librarian makes the other three look at an empty
+  register; notifying each new joiner produces four notices for the first person. Not inside the
+  creating transaction, so a failed notice cannot fail the reservation.
+- **`DUE_SOON_DAYS = 3` is a named constant, not Settings.** It is a property of "soon" in a
+  14-day loan rather than library policy; invariant 7 covers policy numbers an admin may
+  reasonably change, and the answer to "why three?" should be a grep.
+- **Verified before the transaction work:** the browser pass reached **29/29** — the badge counts
+  the inbox rather than the popover's six rows, day grouping separates Today from Yesterday from
+  another year, clicking a row both navigates and marks read, the Unread tab matches the badge,
+  reduced motion disables the shake while keeping the count, and a suspended member can still
+  read. Screenshots in `%LOCALAPPDATA%\Temp\opencode\qa\notifications-*.png`.
 
 ### Unit 15 — Wishlist & Reviews ✅ · `feat/15-wishlist-reviews`
 - **The last unwired control in the app is now wired.** The heart on the book detail page
@@ -742,26 +849,19 @@ tracker before this unit started.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **16** Notifications →
-   **17** Dashboards → **18** Reports & Audit → **19** Settings →
+1. **17** Dashboards →
+   **18** Reports & Audit → **19** Settings →
    **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
-   - **Unit 15 is done — the wishlist and reviews are live.** Every control that shipped
-     disabled with a `title` naming the unit that would open it is now wired; there are no
-     placeholder controls left in the member or public area.
-   - **Unit 16 can be small, as the tracker has said since Unit 14.** `notify()` is called
-     from seven places across circulation, fines and reservations and all the call sites are in
-     place and correct; what is missing is the write, the bell and the page. Nothing has to be
-     restructured. `GET /api/settings/public` already exposes `reservationHoldHours`, which the
-     notification copy needs.
-   - **`Notification.dedupeKey` is a unique sparse index**, and it exists for the maintenance
-     sweep: `runMaintenance()` must be able to run twice in a row without a member receiving
-     two copies of the same overdue notice. That is the idempotency the index was created for.
-   - **Unit 15's `reviewsApi` is the newest client module** and follows the no-positional-
-     fetcher rule the Unit 08 SWR bug taught; Unit 16's fetcher must too.
+   - **Unit 16 is committed but not finished.** Fix `POST /api/maintenance/run` first if the
+     job matters: nothing else in the app depends on it, so it can safely sit until after
+     Unit 17. `notify()` itself — the part every other feature uses — works.
+   - **Unit 17 can use what Unit 16 already built**: the staff layout fires
+     `runMaintenanceIfDue()`, so a dashboard's "last run" figure has a real source, and
+     `StatCard` takes an optional `format` for the money figures (added in Unit 13).
+   - **`getUnreadCount` is already implemented and exported** from `lib/services/notifications.ts`,
+     with the whole-inbox semantics a dashboard KPI needs. Do not build a second one.
    - `GET /api/members/lookup` and `loansApi.list` already serve the Unit 12 UI; do not
      build second versions. `getMemberUnpaidFineTotal` already serves the issue gate.
-   - `StatCard` takes an optional `format`; Unit 17's money figures should pass one rather
-     than letting `toLocaleString` render a currency amount as a bare number.
 
 ### Unit 14 — spec checklist, ticked against the running app
 - [x] Cannot reserve while a copy is effectively available; can when all copies out or held.
@@ -1505,13 +1605,17 @@ hard-coded.
   rather than showing a button that does nothing.
 
 ## In Progress
-- Unit 16 — Notifications. Not started. The `Notification` model, its `dedupeKey` unique sparse
-  index and seven `notify()` call sites across circulation, fines and reservations all exist;
-  `notify()` is a documented stub and `NotificationBell` renders a static count. Only the write,
-  the bell and the page are missing.
-- Unit 15 — Wishlist & Reviews. Complete and verified. See above.
+- **Unit 17 — Dashboards.** Not started. `StatCard` (with its optional `format`), the staff
+  layout's throttled maintenance hook, and the KPI data all exist; `GET /api/dashboard/member`
+  and `/api/dashboard/staff` are the missing pieces, plus both dashboard screens.
+- Unit 16 — Notifications. **Committed as WIP with one known defect** (the maintenance
+  transaction abort). Everything else in the unit works. See above for the narrowed-down cause
+  and the concrete next step.
 
 ## Open Questions
+- **`POST /api/maintenance/run` aborts its transaction intermittently** — the one open defect in
+  the codebase. See the Unit 16 WIP section for the narrowed cause and the concrete next step.
+  Everything else in Unit 16 is working and browser-verified.
 - **The local dev database holds orphaned reservations** — roughly 30 rows whose `book`, and in
   several cases whose `member`, no longer exists. They are left by Units 08–13's QA deleting
   books and users **directly in Mongo**, which bypasses `deleteBook`'s refusal to remove a book with
@@ -1550,7 +1654,21 @@ hard-coded.
   `holds-page.mjs` (43 checks) and `run-unit14-existing.ps1`** — the last reuses whatever dev server
   is already healthy instead of starting one. **Unit 15 added `bootstrap15.mjs`, `reviews-api.mjs`
   (67 checks), `reviews-page.mjs` (55 checks) and `run-unit15.ps1`**, which reuses a healthy server,
-  seeds, runs the API pass, **re-seeds**, then runs the browser pass.
+  seeds, runs the API pass, **re-seeds**, then runs the browser pass. **Unit 16 added
+  `bootstrap16.mjs`, `notifications-api.mjs`, `notifications-page.mjs` and `run-unit16.ps1`**
+  (same shape), using puppeteer-core against the installed Chrome.
+- **A dev server that has been running since before your edits will serve stale code and report
+  it as a fresh bug.** This cost two full debug cycles on Unit 16: a 500 that persisted after the
+  fix was because PID 740 had been serving since before the change and never picked it up. When
+  a fix appears to change nothing, **check the server's start time before re-reading your own
+  code.** Killing it requires the whole process tree (`npm` → `next` → `next-server`), and
+  `.next` must be removed afterwards or every route 404s.
+- **`node --check` on a `.mjs` with top-level `await` reports errors that are not there**, and
+  PowerShell echoes them to stderr alongside real failures — read the exit code, not the stream.
+- **A fixture that cannot reach the state its test is about reports bugs that are not there.**
+  Unit 16's queue-promotion test failed first because the fixture had the book fully out on loan,
+  so there was correctly no free copy to promote into. Check that the fixture can actually
+  produce the state before believing the failure.
 - **Fixtures must be data the app would actually accept.** A made-up ISBN in a seed document does not
   fail loudly; it makes the *form* the thing under test, and the pass then reports a save failure instead
   of a fixture mistake. All fixture ISBNs are checksum-valid, and are verified as such.

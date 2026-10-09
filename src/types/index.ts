@@ -440,6 +440,26 @@ export type FineTotals = {
  * control that is offered and then refuses. Deciding at the boundary means a member sees
  * Edit/Delete exactly on their own rows and staff see Remove exactly where they can use it.
  */
+/**
+ * One notification as the UI receives it (spec 16).
+ *
+ * **`tone` is resolved server-side**, because the bell popover, the popover row and the page
+ * row all colour a tile by type and a `switch` in each of the three is three places for the
+ * palette to disagree. `NOTIFICATION_PRESENTATION` carries the matching icon.
+ */
+export type NotificationSummary = {
+  id: string;
+  type: NotificationType;
+  tone: "info" | "success" | "warning" | "danger";
+  title: string;
+  message: string;
+  /** In-app route to navigate to on click; null when there is nowhere to go. */
+  link: string | null;
+  readAt: string | null;
+  isRead: boolean;
+  createdAt: string;
+};
+
 export type ReviewSummary = {
   id: string;
   bookId: string;

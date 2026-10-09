@@ -34,6 +34,7 @@ import type {
   LoanReturnResult,
   LoanSummary,
   MemberReservations,
+  NotificationSummary,
   RatingSummary,
   ReservationSummary,
   ReviewListResult,
@@ -675,7 +676,15 @@ export const reservationsApi = {
 /* -------------------------------------------------------------------------- */
 
 /** Wire shapes are declared once in `types/index.ts`; re-exported here for components. */
-export type { RatingSummary, ReviewListResult, ReviewSummary, WishlistItem } from "@/types";
+export type {
+  NotificationSummary,
+  RatingSummary,
+  ReviewListResult,
+  ReviewSummary,
+  WishlistItem,
+} from "@/types";
+
+export { NOTIFICATION_PRESENTATION } from "@/lib/notification-templates";
 
 /** Mirrors `upsertReviewSchema`. `rating` is coerced server-side. */
 export type ReviewInput = {
@@ -724,6 +733,60 @@ export const reviewsApi = {
     request<{ summary: RatingSummary }>(`/reviews/${reviewId}`, { method: "DELETE" }).then(
       (d) => d.summary,
     ),
+};
+
+/* -------------------------------------------------------------------------- */
+/* Notifications (spec 16)                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * **The fetcher takes no positional parameters.** SWR calls `fetcher(key)`, so a
+ * `(signal?: AbortSignal)` first argument receives the **string cache key** and hands it to
+ * `fetch` — `Failed to convert value to 'AbortSignal'`. This has bitten this codebase three
+ * times now (Unit 08 books table, Unit 09 catalog, Unit 11 loans), so the cancellation is
+ * hand-rolled and the signature is deliberately empty.
+ */
+export const notificationsApi = {
+  /** `unreadOnly` drives the page's Unread tab. The badge count is always the whole inbox. */
+  list: (
+    filters: { unreadOnly?: boolean; page?: number; limit?: number } = {},
+    signal?: AbortSignal,
+  ) =>
+    requestWithMeta<{ items: NotificationSummary[]; unreadCount: number }>("/notifications", {
+      query: filters,
+      signal,
+    }),
+
+  /** Idempotent - a second press on an already-read notification changes nothing. */
+  markRead: (id: string) =>
+    request<{ id: string }>(`/notifications/${id}/read`, { method: "POST" }),
+
+  /** One `updateMany` server-side, so a large inbox clears in a single request. */
+  markAllRead: () =>
+    request<{ marked: number }>("/notifications/read-all", { method: "POST" }).then(
+      (d) => d.marked,
+    ),
+};
+
+/**
+ * Maintenance counts, as reported by the job.
+ *
+ * Client-side because the "Run maintenance" button in Unit 19's Settings page will call it and
+ * wants to show what the run did; the route is admin-or-cron only and this type keeps the
+ * numbers honest rather than three `number`s at the call site.
+ */
+export type MaintenanceCounts = {
+  expiredReservations: number;
+  dueSoon: number;
+  overdue: number;
+};
+
+export const maintenanceApi = {
+  /** Admin session, or `x-cron-secret` from a scheduler. See `POST /api/maintenance/run`. */
+  run: () =>
+    request<{ counts: MaintenanceCounts; triggeredBy: "admin" | "cron" }>("/maintenance/run", {
+      method: "POST",
+    }),
 };
 
 /* -------------------------------------------------------------------------- */

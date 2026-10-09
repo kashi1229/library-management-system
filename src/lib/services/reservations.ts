@@ -4,7 +4,7 @@ import { AppError } from "@/lib/api";
 import { withTransaction } from "@/lib/db";
 import { Book, Loan, Reservation, User } from "@/models";
 import { logAudit } from "@/lib/services/audit";
-import { notify } from "@/lib/services/notifications";
+import { buildDedupeKey, notify } from "@/lib/services/notifications";
 import { getSettings } from "@/lib/services/settings";
 import { bookRefOr, bookRefs, memberRefOr, memberRefs } from "@/lib/services/refs";
 import { getReadyHoldCounts, promoteReservationQueue } from "@/lib/services/hooks";
@@ -12,6 +12,7 @@ import { issueLoanInSession } from "@/lib/services/circulation";
 import {
   ACTIVE_RESERVATION_STATUSES,
   MEMBER_HISTORY_LIMIT,
+  STAFF_ROLES,
   isActiveReservationStatus,
   type ReservationStatus,
 } from "@/lib/constants";
@@ -492,6 +493,21 @@ export async function reserveBook(bookId: string, actor: Actor): Promise<Reserva
     meta: { book: title, position },
   });
 
+  /*
+   * Tell the desk, but **only when the book is genuinely unavailable**. A reservation can only
+   * exist because `effective` is 0, so this branch is the norm rather than the exception — and
+   * that is the point: a queue is a thing the desk acts on, and without this the register only
+   * learns about a hold when a librarian opens the screen.
+   *
+   * **Every librarian is notified, and one notification covers the whole queue.** Sending it to
+   * one named librarian would make the other three look at an empty register and conclude
+   * nobody is waiting; sending it to each new joiner would produce four notifications for the
+   * first person. The `dedupeKey` is per **book**, not per reservation, so a second person
+   * queueing for the same book adds no further noise — the desk has been told once, and the
+   * register shows the queue length.
+   */
+  await notifyStaffOfQueue(id, title, position);
+
   const [refs, members] = await Promise.all([bookRefs([id]), memberRefs([actor.id])]);
 
   return toReservationSummary(
@@ -501,6 +517,45 @@ export async function reserveBook(bookId: string, actor: Actor): Promise<Reserva
     position,
     now,
   );
+}
+
+/**
+ * Tell every librarian that a book has joined the queue.
+ *
+ * **Not inside the creating transaction**, and deliberately so: `reserveBook` is a single
+ * `create` with no multi-document invariant, and putting the staff fan-out inside a transaction
+ * would hold a write lock on the `users` collection for as long as it took to read the staff
+ * list and insert a notification per librarian. A failed notice must also not be able to fail
+ * the reservation — the member's hold is real whether or not the desk heard about it.
+ *
+ * `dedupeKey` is scoped to the **book and the day**, so the first person to queue for an
+ * unavailable book tells the desk once and the rest of the day's queue joins are silent. That
+ * is the spec's "only for books with zero available — keep to one notification per reservation
+ * to all librarians", read as the rule it is meant to be.
+ */
+async function notifyStaffOfQueue(
+  bookId: Types.ObjectId,
+  title: string,
+  position: number | null,
+): Promise<void> {
+  const staff = await User.find({ role: { $in: [...STAFF_ROLES] }, status: "active" })
+    .select("_id")
+    .lean<Array<{ _id: Types.ObjectId }>>();
+
+  if (staff.length === 0) return;
+
+  const dedupeKey = buildDedupeKey("new_reservation", bookId, new Date());
+
+  for (const member of staff) {
+    await notify({
+      userId: member._id,
+      type: "new_reservation",
+      title: "A book is being waited for",
+      message: `“${title}” now has ${position === 1 ? "someone waiting" : `${position} people waiting`}. It has no copy available to issue.`,
+      link: `/staff/reservations?bookId=${bookId.toString()}`,
+      dedupeKey: `${dedupeKey}:${member._id.toString()}`,
+    });
+  }
 }
 
 /* -------------------------------------------------------------------------- */

@@ -204,8 +204,31 @@ Notes added in Unit 14:
 
 ## Notifications
 | GET | /notifications | M | `unreadOnly, page`; `meta.unreadCount` |
-| POST | /notifications/:id/read | M | |
-| POST | /notifications/read-all | M | |
+| POST | /notifications/:id/read | M | Idempotent; owner-scoped |
+| POST | /notifications/read-all | M | Returns `marked` |
+| POST | /maintenance/run | A **or** `x-cron-secret` | Returns `counts` + `triggeredBy`; see below |
+
+- **No member id anywhere.** The inbox is resolved from the session (invariant 3), so the query
+  schema has no field that could carry one and editing the URL cannot reach another member's
+  notifications.
+- **`meta.unreadCount` counts the whole inbox, not the page.** The number on the bell is the
+  number the member believes, and it cannot be derived from `items.length` once a page is full.
+- **`markRead` is scoped by `{ _id, user }`**, so a guessed id is a 404. "Does not exist" and
+  "not yours" are deliberately the same answer — distinguishing them tells a prober which ids
+  are real. Marking an already-read notification does not move `readAt`.
+- **Every notice carries a `tone`** (`info | success | warning | danger`), resolved server-side,
+  because the bell row, the popover row and the page row all colour a tile by type and a
+  `switch` in each of the three is three places for the palette to disagree.
+- **`POST /maintenance/run`**: the role check runs **first**, so a signed-in member cannot be
+  upgraded by adding the header. An admin run is audited as `maintenance.run`; a cron run writes
+  **no** audit row, because there is no user to attribute it to.
+  - `counts` is `{ expiredReservations, dueSoon, overdue, skipped? }`. `skipped: true` means
+    another sweep held the throttle — reported rather than reported-as-zeros, because "another
+    run was doing this" and "there was nothing to do" are very different statements.
+  - `x-cron-secret` is compared with `timingSafeEqual`. **An unset `CRON_SECRET` closes the
+    secret path** rather than allowing every header.
+- **Known defect:** this route intermittently 500s with `Transaction has been aborted`. See
+  `progress-tracker.md` §Unit 16.
 
 ## Dashboard, Reports, Audit, Settings, Maintenance
 | GET | /dashboard/member | M | KPIs, active loans, ready holds, recommendations |

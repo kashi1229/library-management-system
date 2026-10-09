@@ -160,6 +160,37 @@ renders — one serialiser, so a save cannot show different availability from th
 saved from. `reviews.ts` imports models and `refs.ts` only, and owns the rating aggregate,
 which is why a review write does not have to go through `books.ts` to update a book.
 
+`notifications.ts` stays in the **leaf tier** with `audit.ts` and `settings.ts`: every
+circulation service already calls it, so anything it imported would be imported by all of them.
+`maintenance.ts` (Unit 16) sits above `reservations.ts` and `notifications.ts` and imports
+neither `books.ts` nor `circulation.ts` — it reads loans and titles and writes notices.
+
+### Two rules the notification layer established (Unit 16)
+
+**A duplicate-key error cannot be caught inside a transaction.** MongoDB aborts the whole
+transaction on *any* write error, so `catch (E11000) { return }` leaves the caller inside a
+transaction that is already dead: every later write in it fails with *"Transaction has been
+aborted"* and the commit fails too. A "handled" duplicate therefore silently destroys the rest
+of the unit of work — which is exactly what the spec's "swallow duplicate-key errors from
+`dedupeKey`" would have done. **Idempotent keys are read before the insert**, in the caller's
+session so the read sees the same snapshot; the unique index remains the guarantee, and the
+catch is kept only for the concurrent-insert race, where no transaction is open.
+
+**`getSettings()` upserts, so it is a *write* inside any open transaction.** Any function that
+opens a transaction must not call it: the write conflicts with, or self-conflicts against, other
+writes to the singleton. Read policy with a plain `Setting.findOne(...).select(...)` inside a
+transaction, or read it before opening one. This is the unresolved cause of the Unit 16
+maintenance defect — see `progress-tracker.md`.
+
+### Overlapping background work needs two mechanisms (Unit 16)
+
+The maintenance job is protected by **both** a conditional write to `Settings.lastMaintenanceAt`
+(which stops two *machines* running it twice) **and** a module-level promise chain in
+`runExclusive` (which stops two requests inside one *process* overlapping). Neither alone is
+sufficient: the settings claim excludes a second caller from starting work, but two callers can
+still overlap between the claim and the first transaction. The staff layout fires a throttled
+sweep on **every** page load, so this is an everyday condition rather than an edge case.
+
 `reservations.ts` needs `circulation.ts` (fulfilling a hold issues a loan) and
 `circulation.ts` needs the queue primitives, so the primitives **cannot** live in
 `reservations.ts` — that is a cycle. It is the same reason `refs.ts` exists. Putting them in a

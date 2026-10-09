@@ -325,9 +325,62 @@
    Reduced motion: keep opacity fades ≤ 150ms, drop all transforms/drifts
    ========================================================================== */
 
+/* ==========================================================================
+   Notification bell (Unit 16)
+   ========================================================================== */
+
+/*
+ * A short ring, not a wobble. The bell is the app's only notification of arrival, so the
+ * animation has to be noticeable in peripheral vision and gone in well under a second — anything
+ * longer becomes an irritation on the page the member is trying to read.
+ *
+ * Rotate rather than translate: the bell hangs from a fixed point in the button, so a sideways
+ * swing reads as the whole control moving.
+ */
+@theme inline {
+  /*
+   * Exposed as a Tailwind utility (`animate-bell-shake`) rather than referenced as a raw
+   * `animation:` in the component, because the project rule is that components carry token
+   * classes only. The duration is named rather than inline so the motion is one value to tune.
+   */
+  --animate-bell-shake: bell-shake 0.7s ease-in-out;
+}
+
+@keyframes bell-shake {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  15% {
+    transform: rotate(13deg);
+  }
+  30% {
+    transform: rotate(-11deg);
+  }
+  45% {
+    transform: rotate(8deg);
+  }
+  60% {
+    transform: rotate(-6deg);
+  }
+  75% {
+    transform: rotate(3deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+
+  /*
+   * The bell shake is the one animation whose *information* would be carried by the motion
+   * itself, so it is switched off by name rather than left to the blanket duration override
+   * below. A member who has asked for reduced motion still gets the new count — the badge is
+   * the signal, and the shake is only how it was noticed.
+   */
+  .animate-bell-shake {
+    animation: none !important;
   }
 
   *,

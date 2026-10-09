@@ -101,6 +101,25 @@ export async function promoteReservationQueue(
   if (!book || book.status !== "active") return 0;
 
   const title = String(book.title);
+
+  /*
+   * **Policy is read outside any caller transaction, and the reason is a bug this unit found.**
+   *
+   * `getSettings()` *upserts* the singleton, so calling it with a transaction open writes to the
+   * `settings` document. The caller `runMaintenance` has just claimed its throttle by writing
+   * `lastMaintenanceAt` to that very document, so the two writes are in one transaction and
+   * Mongo aborts it: *"Transaction has been aborted"*. The maintenance job 500ed and expired
+   * nothing at all, with `tsc`, `eslint` and `next build` all clean.
+   *
+   * The fix belongs here rather than in the caller: this read is a **policy number**, and
+   * invariant 7 requires it to come from Settings *at request time* — reading it before the
+   * transaction opens is more correct, not less, because an admin who changes the hold window
+   * mid-sweep is picked up rather than pinned to the snapshot. It is also cached for thirty
+   * seconds, so this is not an extra query per promotion.
+   *
+   * The caller must still not wrap a `settings` write in the same transaction. `claimRun`
+   * deliberately runs before any transaction opens here.
+   */
   const settings = await getSettings();
 
   let holds = (await getReadyHoldCounts([bookId], session)).get(bookId.toString()) ?? 0;
