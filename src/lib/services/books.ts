@@ -231,6 +231,10 @@ export { getReadyHoldCounts };
  *
  * Clamped at zero and never above `totalCopies`, because a hand-edited count should
  * render "None available" rather than a negative or impossible number.
+ *
+ * `wishlisted` is filled in afterwards by `serialiseAll`, which is the only exit for a list
+ * result — so it is declared here as `false` purely to satisfy the type, and is always
+ * overwritten. Nothing reads it from this return value.
  */
 async function withAvailability(
   items: BookListItem[],
@@ -245,6 +249,7 @@ async function withAvailability(
       book.totalCopies,
       Math.max(0, book.availableCopies - (holds.get(book._id) ?? 0)),
     ),
+    wishlisted: false,
   }));
 }
 
@@ -258,7 +263,10 @@ async function withAvailability(
  * the declared contract. Declaring the narrower type is what let the field be
  * attached on one branch and omitted on another without a single compiler complaint.
  */
-export async function listBooks(query: ListBooksQuery): Promise<{
+export async function listBooks(
+  query: ListBooksQuery,
+  userId?: Types.ObjectId,
+): Promise<{
   items: CatalogBook[];
   meta: { page: number; limit: number; total: number; totalPages: number };
 }> {
@@ -279,7 +287,7 @@ export async function listBooks(query: ListBooksQuery): Promise<{
    */
   if (query.availability === "available") {
     const all = await Book.find(filter).sort(sort).lean();
-    const serialised = await serialiseAll(all);
+    const serialised = await serialiseAll(all, userId);
     const available = serialised.filter((book) => book.effectiveAvailable > 0);
     const start = (page - 1) * limit;
 
@@ -308,7 +316,10 @@ export async function listBooks(query: ListBooksQuery): Promise<{
   // **default** list while working in the filtered one — so the catalog rendered
   // "NaN of 1 available" on every card and the check that passed was the one that
   // happened to take the other branch. One serialisation path for every result set.
-  const items = await serialiseAll(docs as unknown as Array<Record<string, unknown>>);
+  const items = await serialiseAll(
+    docs as unknown as Array<Record<string, unknown>>,
+    userId,
+  );
 
   return {
     items,
@@ -317,13 +328,18 @@ export async function listBooks(query: ListBooksQuery): Promise<{
 }
 
 /**
- * Serialise a whole result set, with `effectiveAvailable` attached.
+ * Serialise a whole result set, with `effectiveAvailable` and `wishlisted` attached.
  *
- * The single exit for list results, so a new field cannot be attached on one branch
- * and forgotten on another.
+ * The single exit for list results, so a new field cannot be attached on one branch and
+ * forgotten on another — which is how the Unit 09 catalog shipped "NaN of 1 available".
+ *
+ * `wishlisted` costs **one query for the whole page**, not one per card: the member's saved
+ * book ids are read into a `Set` and looked up per row. A 20-card grid would otherwise be
+ * 20 round trips for a 14px heart.
  */
 async function serialiseAll(
   docs: Array<Record<string, unknown>>,
+  userId?: Types.ObjectId,
 ): Promise<CatalogBook[]> {
   const categories = await categoryMap([
     ...new Set(docs.map((doc) => doc.category as Types.ObjectId)),
@@ -331,7 +347,78 @@ async function serialiseAll(
 
   const items = docs.map((doc) => toApi(doc, categories.get(String(doc.category)) ?? null));
 
-  return withAvailability(items);
+  const available = await withAvailability(items);
+  const saved = await savedBookIds(userId, available.map((book) => new Types.ObjectId(book._id)));
+
+  return available.map((book) => ({ ...book, wishlisted: saved.has(book._id) }));
+}
+
+/**
+ * Which of these books the member has on their reading list.
+ *
+ * `userId` comes from the **cookie session only** (invariant 3) — never from a query
+ * parameter, which would let anyone ask which books a given member has saved. With no
+ * session it short-circuits to an empty set rather than querying, so an anonymous catalog
+ * crawl costs nothing extra.
+ */
+async function savedBookIds(
+  userId: Types.ObjectId | undefined,
+  bookIds: Types.ObjectId[],
+): Promise<Set<string>> {
+  const saved = new Set<string>();
+  if (!userId || bookIds.length === 0) return saved;
+
+  const ids = await Wishlist.find({ member: userId, book: { $in: bookIds } })
+    .select("book")
+    .lean<Array<{ book: Types.ObjectId }>>();
+
+  for (const row of ids) saved.add(String(row.book));
+
+  return saved;
+}
+
+/**
+ * A set of catalog books by id, each with `effectiveAvailable`.
+ *
+ * Built on `serialiseAll` so a saved book looks **exactly** like it does everywhere else —
+ * same cover, same category accent, same availability that already subtracts ready holds.
+ * Reading the raw `wishlist` rows instead would mean a second definition of "is this
+ * available", and the reading list is precisely where a member looks before deciding to
+ * reserve.
+ *
+ * Ids with no book are simply absent from the map. The caller decides what a missing book
+ * means; returning a placeholder with `effectiveAvailable: 0` would make a deleted book
+ * indistinguishable from an out-of-stock one.
+ */
+export async function listCatalogBooksByIds(
+  ids: Types.ObjectId[],
+): Promise<Map<string, CatalogBook>> {
+  const found = new Map<string, CatalogBook>();
+  const unique = [...new Set(ids.map(String))].filter((id) => Types.ObjectId.isValid(id));
+  if (unique.length === 0) return found;
+
+  const docs = await Book.find({ _id: { $in: unique.map((id) => new Types.ObjectId(id)) } })
+    .lean<Array<Record<string, unknown>>>();
+
+  for (const item of await serialiseAll(docs)) {
+    found.set(item._id, item);
+  }
+
+  return found;
+}
+
+/**
+ * One catalog book by id, with `effectiveAvailable` — the same shape `listBooks` returns.
+ *
+ * Throws rather than returning a placeholder, because every caller wants the book: the
+ * wishlist toggle posts this id it was just handed, so a miss means the id was wrong, and a
+ * silent empty card would look like a rendering bug.
+ */
+export async function catalogBookFor(id: Types.ObjectId): Promise<CatalogBook> {
+  const found = await listCatalogBooksByIds([id]);
+  const book = found.get(String(id));
+  if (!book) throw AppError.notFound("That book could not be found.");
+  return book;
 }
 
 /** One book with the derived numbers the staff UI shows. */
@@ -408,6 +495,9 @@ export async function getCatalogBook(
     // Everyone in the queue, not "everyone except you". A reader needs to know how long the
     // wait is, and a hold they are already in counts as position one.
     queueLength: queue.queueLength,
+    // From the same `Wishlist` read the queue already did, so the heart on this page and the
+    // queue length cannot describe different moments.
+    wishlisted: Boolean(wishlisted),
     userState: {
       wishlisted: Boolean(wishlisted),
       activeLoan: Boolean(activeLoan),

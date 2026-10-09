@@ -3,16 +3,182 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, and reservations.**
-  Units 01–14 complete. Units 15 → 21 to go, per the developer's instruction to
+- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, reservations, and wishlist/reviews.**
+  Units 01–15 complete. Units 16 → 21 to go, per the developer's instruction to
   complete the application rather than pause for review per unit.
 
 ## Current Goal
-- Build Units 15 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- **Units 11–14 complete; Unit 15 (Wishlist & Reviews) is next** — the wishlist button on
-  the book detail page is the last control still labelled with the unit that owns it.
+- Build Units 16 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- **Unit 16 (Notifications) is next**, and the tracker has said for three units that it can
+  now be small: `notify()` is already called from seven places across circulation, fines and
+  reservations, and all the call sites are correct. What is missing is the write itself, the
+  bell and the page.
 
 ## Completed
+
+### Unit 15 — Wishlist & Reviews ✅ · `feat/15-wishlist-reviews`
+- **The last unwired control in the app is now wired.** The heart on the book detail page
+  shipped in Unit 09 rendering `disabled` with a `title` naming the unit that would open it;
+  it is now a real optimistic toggle, and it is also on every catalog card.
+- **`lib/services/wishlist.ts`** — `listWishlist`, `addToWishlist`, `removeFromWishlist`.
+  Saves and removals are **idempotent** and resolve the member from the session, so
+  `/wishlist?memberId=<someone else>` lists your own list and `DELETE /wishlist/:bookId` can
+  only remove your own row. The scope is the *session member*, and the schema has no member
+  field to get wrong.
+  - **The wishlist list is built from the catalog reader**, so a saved book arrives as the
+    same `CatalogBook` the catalog card renders — same `effectiveAvailable`, same cover, same
+    category tint. A second serialiser for the same book would eventually disagree with the
+    first, and the disagreement would show as a save whose availability differs from the page
+    it was saved from.
+  - **An archived book cannot be saved**, refused with a sentence naming the reason, and the
+    unique index means a double-click cannot create two rows.
+- **`lib/services/reviews.ts`** — `listReviews`, `upsertReview`, `deleteReview`, plus
+  `recomputeBookRating`.
+  - **The review write and the book's aggregate move in one transaction.** A rating row
+    committed without `Book.ratingAvg`/`ratingCount` would leave a book whose card says
+    "No ratings" directly above a page listing four reviews. `recomputeBookRating` reads from
+    the aggregation, not from the row in hand, so a second concurrent write cannot leave the
+    average counting a review that is not there.
+  - **One review per member per book, enforced by the index and honoured by the service.** A
+    second `POST` **edits** the existing row rather than adding a second one — same `_id`,
+    same `updatedAt`. There is no separate edit route, because the second post *is* the edit,
+    and a member who has already reviewed is exactly the case where a "you already reviewed
+    this" 409 would be the wrong answer.
+    - **The race is handled by adopting the row, not by failing.** Two clicks can both pass
+      the "have they reviewed it" check; the loser's insert violates the unique index and the
+      service then *finds and edits* the row the winner just created. A request that succeeded
+      in substance should not return a failure.
+  - **The eligibility rule is a loan in any state, not a current loan.** The refusal message
+    names the action: *"Borrow … before leaving a review, so your rating means something."*
+    A member who borrowed and returned the book is exactly who the rule exists to include.
+  - **Suspended members can read reviews but not publish them** (`requireActiveMember`),
+    matching the confirmed rule that suspension stops borrowing, not reading.
+  - **`mine` is returned on every page of reviews**, not derived from the visible rows. The
+    composer needs the caller's own review to offer an edit, and reconstructing it client-side
+    would be a second implementation that fails silently for anyone with more than one page of
+    reviews — showing an empty composer that quietly creates a duplicate.
+  - **The distribution is aggregated over the whole collection, not the page.** Deriving it
+    from the ten visible reviews would make the bars change as a reader pages, which reads as
+    the ratings themselves changing. Verified explicitly: the same `?limit=2` request returns
+    the same five bars as the full one.
+  - **An empty comment is stored as `null`, not `""`.** The validator trims, so whitespace
+    became `""` and the collection held two representations of "rated it, wrote nothing".
+    Found by an assertion that expected `null`. One representation, decided once, in the
+    service.
+  - **Staff removal is audited as moderation, and the member's own deletion is not.**
+    `moderated: true` plus the reviewer's member id and the average the book was *left* at —
+    the consequence a reader cannot reconstruct from the log afterwards. A member deleting
+    their own review writes the same action with `moderated: false`, so the audit trail
+    distinguishes "a librarian removed this" from "the writer took it back".
+- **Routes**: `GET/POST /api/wishlist`, `DELETE /api/wishlist/[bookId]`,
+  `GET/POST /api/books/[id]/reviews`, `DELETE /api/reviews/[id]`. Reviews are **public on
+  read** — the summary is the thing a visitor came for — and writes are member-only.
+  `DELETE /api/reviews/[id]` authorises **in the service** (owner or staff, 403 otherwise),
+  because both are allowed and only the review's own member tells them apart.
+  - **An archived book 404s on `/reviews` for everyone, staff included**, so the archive is
+    not enumerable through this route.
+- **`CatalogBook` gained a required `wishlisted`, resolved in one query** by `serialiseAll`
+  from the cookie session rather than per-card. It was previously optional and computed for
+  the detail page only; a catalog grid of twenty cards cannot ask twenty questions. Because it
+  is required, `withAvailability` now sets it to `false` explicitly and the comment says why
+  that value is always overwritten — a field that satisfies a type but is never read is how the
+  next caller forgets to fill it.
+- **The star picker is five native radio inputs**, not styled buttons with an ARIA
+  radiogroup. The browser already implements one tab stop, arrow keys and the correct
+  accessibility tree. Hover and focus **preview** the rating without committing it, which is
+  the behaviour a reader expects from a star field and is invisible to a keyboard user.
+- **No heart at all for a visitor**, on either the card or the detail page. A grid of hearts
+  that all answer "sign in" is a wall of controls that cannot be used, and it makes the feature
+  look broken on the one page every visitor judges the site by. A visitor is told *"Sign in to
+  rate"* instead, which is the sentence that actually applies to them.
+- **`/wishlist`** — a grid of saved books with the real cover, availability, and a Reserve
+  button **only where it can work** (nothing free and the book is active). A disabled Reserve
+  costs the reader a decision and says "not now" without saying why.
+- **"Write a review" on My Loans History** deep-links to `/catalog/[slug]#reviews` rather than
+  opening a dialog here: reviewing is the one member action that needs the rating summary and
+  the existing reviews beside it. Guarded on `book.slug`, because `bookRefOr` returns `slug: ""`
+  for a deleted book and `href="/catalog/#reviews"` would take the member to a 404 from a button
+  labelled "review" — the same bug Unit 14 found in the staff register.
+- **Verified against the live local MongoDB: 67/67 API checks and 55/55 browser checks, 0 page
+  errors, 0 console errors**, at 390 / 768 / 1280 px in light and dark. `tsc`, `eslint` and
+  `next build` clean; all four routes and the page present in the build output.
+  - **The aggregate is proved as arithmetic, not as "a number appeared".** The fixture seeds a
+    known spread — five 5s, one 4, one 3, sum 32 over 7 — and the average (4.6), the count and
+    all five bars are asserted as numbers, then re-asserted at `?limit=2` to prove the summary
+    is not computed from the page. After a 1-star review: `4.4 / 8`, and the collection holds
+    eight reviews, not nine.
+  - **The keyboard path is driven with the keyboard**: focus the first radio, two `ArrowRight`
+    presses, and the third is selected — then hover a fifth star and confirm the choice did
+    not move.
+- **Deliberately not done:**
+  - **No staff reviews register.** Staff moderation happens on the book page, where the
+    review and the thing it is about are the same screen. A separate list of every review in
+    the library is not something the spec asks for and is not something a librarian does.
+  - **No review edit/delete route pair** — a second `POST` is the edit, and `DELETE` covers
+    both cases with the service deciding which.
+  - **No helpful-vote on reviews.** Not in the spec.
+  - **The browser pass did not run the earlier Playwright harness.** Playwright was not in the
+    project and downloading a browser was cut short by the developer, so the pass uses
+    **puppeteer-core with the installed Chrome** — the harness Units 06–14 already used, so no
+    project dependency is added.
+
+### Unit 15 — bugs found by the API pass
+- **A whitespace-only comment was stored as `""` instead of `null`.** The validator trims, so
+  `"   "` became `""`, and the collection then held two ways of saying "rated it, wrote
+  nothing". Every `if (review.comment)` check would have had to know about both. Normalised
+  once in the service, with a comment saying why.
+- **`withAvailability` stopped type-checking** the moment `wishlisted` became required on
+  `CatalogBook`, which `tsc` caught immediately — recorded because the fix is instructive
+  rather than because it was subtle: the field is set to `false` there and *always*
+  overwritten by `serialiseAll`, and that is now stated in the comment so the next caller does
+  not treat it as meaningful.
+
+### Unit 15 — bugs found by reading the screenshots
+Found the way Unit 07's truncated category names were found: **every assertion passed while the
+layout was wrong**, because no assertion looked at the rendered row.
+
+- **At 390px a review row tore into three lines** — name, then stars, then the date on its own.
+  The stars and the date describe the same review, and wrapping them independently makes one
+  fact look like three. They are now a single `whitespace-nowrap` group that wraps together or
+  not at all. Only visible at 390px with a long enough name; the 1280px screenshot was correct.
+
+### Unit 15 — harness lessons
+- **A fixture that violates a database rule is caught by the database, not by the pass.** The
+  first `bootstrap15` gave one member two reviews of the same book and Mongo refused the whole
+  insert with `E11000 … review_one_per_member_book`. That is the rule working; the fixtures had
+  to give each reviewer their own.
+- **A stored average does not round-trip, so never reconstruct a total from it.** The first
+  version of the pass computed the expected average as `(4.6 × 7 + 1) / 8`, which is not what
+  the code does: `4.6` is the *rounded* value, `4.6 × 7 = 32.2` and the reviews actually sum to
+  32. Asserting on the reconstruction would fail a correct implementation. The total is now
+  tracked as an **integer** and the average derived from it.
+- **A wrong hand-written `DISTRIBUTION` looks exactly like a real bug.** One seeded 4 and one
+  seeded 3 is `[0,0,1,1,5]`, and the constant said `[0,0,0,1,5]`. Reading the documents in
+  Mongo directly settled it in one query rather than an argument.
+- **Documents written by the app carry no fixture marker.** Deleting by `__qa15` left a
+  member's review behind from the previous run and it collided with the unique index on
+  re-seed. The previous run's user ids are recorded in `qa15_state` so API-created rows can be
+  found by member — the Unit 14 lesson, in a second unit.
+- **Take the element you mean, not the first one on the page.** `clickHeart` originally clicked
+  the first heart, and since the fixture had two books saved the pass began by *removing* one
+  and then asserted the count had gone up. It now selects by `aria-pressed`.
+- **An accessible name with typographic quotes does not survive a Puppeteer selector.**
+  `[aria-pressed*="reading list" i]` worked for `$eval` and failed for `page.click`, because the
+  selector reached the browser with its inner quotes stripped. Selecting the node inside the
+  page and clicking it is immune.
+- **`element.click()` is not a real click.** The My Loans History tab did not respond to a
+  synthetic `.click()` from `page.evaluate`, so the "Write a review" link appeared to be missing
+  — the exact Unit 07 lesson, where `el.click()` also failed to reproduce a real interaction.
+  `tab.click()` as an ElementHandle does.
+- **A harness must not report success on the way down.** An exception escaping the `try` printed
+  "all browser checks passed" from `finally` and then exited non-zero. A thrown error is now a
+  failed check.
+- **Assert on the accessible name, not on visible text, for an icon button.** The moderation
+  control is a trash icon; its `aria-label` is the entire signal. Matching `textContent` found
+  nothing and read as "staff have no moderation control".
+- **The API pass and the browser pass each need their own seed.** They mutate the same
+  fixtures, so running both against one seed makes the second fail on data the first changed.
+  `run-unit15.ps1` re-seeds between them.
 
 ### Unit 14 — Reservations ✅ · `feat/14-reservations`
 - **The queue is live end to end.** A member reserves from the book detail page, a returned copy
@@ -576,20 +742,22 @@ tracker before this unit started.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **15** Wishlist & Reviews →
-   **16** Notifications → **17** Dashboards → **18** Reports & Audit → **19** Settings →
+1. **16** Notifications →
+   **17** Dashboards → **18** Reports & Audit → **19** Settings →
    **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
-   - **Unit 14 is done — the reservation queue is live.** `promoteReservationQueue` and
-     `fulfilReadyReservationIfAny` are real implementations in `lib/services/hooks.ts`, and
-     `GET /api/settings/public` already exposes `reservationHoldHours`, which Unit 16's
+   - **Unit 15 is done — the wishlist and reviews are live.** Every control that shipped
+     disabled with a `title` naming the unit that would open it is now wired; there are no
+     placeholder controls left in the member or public area.
+   - **Unit 16 can be small, as the tracker has said since Unit 14.** `notify()` is called
+     from seven places across circulation, fines and reservations and all the call sites are in
+     place and correct; what is missing is the write, the bell and the page. Nothing has to be
+     restructured. `GET /api/settings/public` already exposes `reservationHoldHours`, which the
      notification copy needs.
-   - **Unit 15 is next and is the last unwired control.** The wishlist button on the book
-     detail page still renders disabled with a `title` saying it opens in a later release.
-     `userState.wishlisted` is already computed and correct, so the toggle only needs the route,
-     the page and the heart animation.
-   - **Unit 16 can now be small.** `notify()` is called from seven places across circulation,
-     fines and reservations. All the call sites are in place and correct; what is missing is the
-     write, the bell and the page. Nothing has to be restructured.
+   - **`Notification.dedupeKey` is a unique sparse index**, and it exists for the maintenance
+     sweep: `runMaintenance()` must be able to run twice in a row without a member receiving
+     two copies of the same overdue notice. That is the idempotency the index was created for.
+   - **Unit 15's `reviewsApi` is the newest client module** and follows the no-positional-
+     fetcher rule the Unit 08 SWR bug taught; Unit 16's fetcher must too.
    - `GET /api/members/lookup` and `loansApi.list` already serve the Unit 12 UI; do not
      build second versions. `getMemberUnpaidFineTotal` already serves the issue gate.
    - `StatCard` takes an optional `format`; Unit 17's money figures should pass one rather
@@ -1337,10 +1505,11 @@ hard-coded.
   rather than showing a button that does nothing.
 
 ## In Progress
-- Unit 15 — Wishlist & Reviews. Not started. The `Wishlist` model, its `{member, book}` unique
-  index and `userState.wishlisted` all exist; the heart button on the book detail page is the last
-  control in the app still disabled with a `title` naming the unit that opens it.
-- Unit 14 — Reservations. Complete and verified. See above.
+- Unit 16 — Notifications. Not started. The `Notification` model, its `dedupeKey` unique sparse
+  index and seven `notify()` call sites across circulation, fines and reservations all exist;
+  `notify()` is a documented stub and `NotificationBell` renders a static count. Only the write,
+  the bell and the page are missing.
+- Unit 15 — Wishlist & Reviews. Complete and verified. See above.
 
 ## Open Questions
 - **The local dev database holds orphaned reservations** — roughly 30 rows whose `book`, and in
@@ -1356,7 +1525,7 @@ hard-coded.
 - `MONGODB_URI` already points at a running **local** MongoDB, converted to a single-node replica
   set (`rs0`) so circulation transactions commit. **`mongod.cfg` lives outside the repo**, so
   another machine is standalone again and circulation will 500 there — the setup steps must go in
-  the README before Unit 21. Every unit has now been verified against a real database, Units 11–14
+  the README before Unit 21. Every unit has now been verified against a real database, Units 11–15
   including their transactions.
 - **A dev server was already running on port 3000 when Unit 14 started.** It was healthy and
   connected, so the pass reused it rather than starting a second one — two `next dev` processes in
@@ -1379,7 +1548,9 @@ hard-coded.
   (fixtures), `books-api.mjs` (73 checks), `books-page.js` (129 checks), `books-audit.mjs` and
   `run-unit08.ps1`. **Unit 14 added `bootstrap14.mjs`, `reservations-api.mjs` (74 checks),
   `holds-page.mjs` (43 checks) and `run-unit14-existing.ps1`** — the last reuses whatever dev server
-  is already healthy instead of starting one.
+  is already healthy instead of starting one. **Unit 15 added `bootstrap15.mjs`, `reviews-api.mjs`
+  (67 checks), `reviews-page.mjs` (55 checks) and `run-unit15.ps1`**, which reuses a healthy server,
+  seeds, runs the API pass, **re-seeds**, then runs the browser pass.
 - **Fixtures must be data the app would actually accept.** A made-up ISBN in a seed document does not
   fail loudly; it makes the *form* the thing under test, and the pass then reports a save failure instead
   of a fixture mistake. All fixture ISBNs are checksum-valid, and are verified as such.

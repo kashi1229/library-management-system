@@ -289,6 +289,19 @@ export type BookDetail = BookSummary & {
  */
 export type CatalogBook = BookSummary & {
   effectiveAvailable: number;
+  /**
+   * Is this on the signed-in reader's reading list (F10)?
+   *
+   * **Required, not optional**, even though it only means anything to a signed-in reader.
+   * An optional field here would be one a caller can silently forget and then read as
+   * `false` — so every heart would render unsaved and the bug would look like the wishlist
+   * not working rather than like a missing field. The catalog list reader fills it from the
+   * **cookie session only**, in one query for the whole page.
+   *
+   * Always `false` when there is no session, and on the staff table, where the reader is not
+   * browsing books to save them.
+   */
+  wishlisted: boolean;
 };
 
 /** What the signed-in user has in flight for one book, for the detail actions. */
@@ -412,6 +425,70 @@ export type FineTotals = {
   unpaidTotal: number;
   collectedThisMonth: number;
   waivedThisMonth: number;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Wishlist & Reviews (spec 15)                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One review, as the book page shows it.
+ *
+ * `isMine` and `canModerate` are **computed server-side from the session**, never derived
+ * in the component. A client that worked out "is this mine" by comparing ids would render
+ * an Edit/Delete menu on a review it does not own, and the server would then 403 — a
+ * control that is offered and then refuses. Deciding at the boundary means a member sees
+ * Edit/Delete exactly on their own rows and staff see Remove exactly where they can use it.
+ */
+export type ReviewSummary = {
+  id: string;
+  bookId: string;
+  rating: number;
+  /** Optional — a rating on its own is a complete review. */
+  comment: string | null;
+  member: { id: string; name: string; avatar: CloudinaryImage | null };
+  createdAt: string;
+  updatedAt: string;
+  /** True when the caller wrote it. */
+  isMine: boolean;
+  /** True when the caller is staff and may moderate anyone's review. */
+  canModerate: boolean;
+};
+
+/**
+ * The five-bar rating summary.
+ *
+ * **The counts are real, not derived from the mean.** A mean of 4.3 across 12 ratings
+ * could be eleven 5s and one 1, or a genuine spread, and a reader deciding whether to trust
+ * a rating needs the spread. `distribution` is index 0 = one star … index 4 = five stars,
+ * and always has five entries so the bars render even at zero.
+ */
+export type RatingSummary = {
+  average: number;
+  count: number;
+  distribution: [number, number, number, number, number];
+};
+
+/**
+ * The rating summary, the page of reviews, and **the caller's own review**.
+ *
+ * `mine` is returned regardless of which page is showing. The composer needs it to offer an
+ * edit, and a member with more than ten reviews would otherwise be looking at a page their
+ * own review is not on — with a composer that quietly offers to create a second one.
+ */
+export type ReviewListResult = {
+  summary: RatingSummary;
+  items: ReviewSummary[];
+  /** The caller's own review, or `null`. `null` for a visitor. */
+  mine: ReviewSummary | null;
+};
+
+/** One book on the member's wishlist. */
+export type WishlistItem = {
+  id: string;
+  /** The catalog book, so the card shows the same cover, rating and availability. */
+  book: CatalogBook;
+  savedAt: string;
 };
 
 /* -------------------------------------------------------------------------- */

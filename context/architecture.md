@@ -154,6 +154,12 @@ reservations.ts  — reserve, cancel, fulfil, expire, list, getQueueInfo,
 books.ts, members.ts, routes, components
 ```
 
+`wishlist.ts` and `reviews.ts` (Unit 15) sit at the `books.ts` level: `wishlist.ts` imports
+`books.ts` because a saved book is returned as the **same `CatalogBook`** the catalog card
+renders — one serialiser, so a save cannot show different availability from the page it was
+saved from. `reviews.ts` imports models and `refs.ts` only, and owns the rating aggregate,
+which is why a review write does not have to go through `books.ts` to update a book.
+
 `reservations.ts` needs `circulation.ts` (fulfilling a hold issues a loan) and
 `circulation.ts` needs the queue primitives, so the primitives **cannot** live in
 `reservations.ts` — that is a cycle. It is the same reason `refs.ts` exists. Putting them in a
@@ -191,7 +197,7 @@ Two consequences worth stating:
 - `proxy.ts` does coarse gating: unauthenticated → `/login?next=…` for `(member)` and `/staff` routes; non-staff hitting `/staff/*` → redirect `/dashboard`; signed-in user hitting `/login` or `/register` → redirect to their home.
 - **Real enforcement is server-side**: every route handler calls `requireSession()` / `requireRole([...])`, and re-loads the user from the DB to confirm `status` and current `role` (never trust the token alone for privileged actions).
 - Members can only read/modify their own loans, fines, reservations, wishlist, notifications, profile. Ownership is checked in services using the session user id, never an id from the request body.
-- Suspended users: may sign in and read; blocked from reserving, renewing, and being issued books. Wishlist and profile edits remain allowed.
+- Suspended users: may sign in and read; blocked from reserving, renewing, and being issued books. Wishlist and profile edits remain allowed. **Publishing a review is also blocked** (`requireActiveMember`, Unit 15) — it is a member action with a consequence for other readers, not a profile edit.
 
 ## Business Rules (authoritative)
 
@@ -225,13 +231,13 @@ All values below are read from the `Setting` singleton.
 2. **Every API route authenticates and authorises first**, using `requireSession`/`requireRole`, before touching data.
 3. **Ownership is derived from the session**, never from client-supplied user ids (except staff acting on a member through an explicit `memberId` that is role-checked).
 4. **All inputs are validated with zod** before reaching a service. Services assume typed, validated input but re-check business rules.
-5. **Multi-document changes (issue, return, reserve-promote, review rating recompute) run in a Mongo transaction.** `availableCopies` must never go negative or exceed `totalCopies`.
+5. **Multi-document changes (issue, return, reserve-promote, review rating recompute) run in a Mongo transaction.** `availableCopies` must never go negative or exceed `totalCopies`. A review write and `Book.ratingAvg`/`ratingCount` are one transaction (Unit 15): a rating row committed without its aggregate would put a card reading "No ratings" directly above a page listing four reviews. `recomputeBookRating` aggregates the collection rather than adjusting the row in hand, so a concurrent write cannot leave the average counting a review that is not there.
 6. **`availableCopies` is only changed by circulation services** (issue/return) and book total-copy edits. Never from the UI or generic update endpoints.
 7. **Policy numbers come from Settings**, never hard-coded.
 8. **Passwords and `passwordHash` never leave the server.** Every user query used in responses uses a safe projection (`-passwordHash`).
 9. **Secrets (`CLOUDINARY_API_SECRET`, `JWT_SECRET`) never reach the client.** Uploads use server-signed parameters; the client only receives signature, timestamp, folder.
 10. **Deletes of history are forbidden**: loans, fines, audit logs are never deleted.
-11. **Audit logging is mandatory** for: user create/suspend/activate/password-reset, book create/update/archive/delete, issue/return/renew, fine collect/waive, reservation fulfil/cancel by staff, settings change.
+11. **Audit logging is mandatory** for: user create/suspend/activate/password-reset, book create/update/archive/delete, issue/return/renew, fine collect/waive, reservation fulfil/cancel by staff, settings change, and **every review write** (`review.create`, `review.update`, `review.delete` — Unit 15). A staff review removal records `moderated: true` and the average and count the book was left at; a member removing their own review records `moderated: false`, so the trail distinguishes moderation from an author taking their words back.
 12. **All dates are stored as UTC `Date`**; formatting happens in the UI. "Days overdue" is computed with date-fns `differenceInCalendarDays`.
 13. **UI uses only design tokens** from `ui-context.md` (no raw hex values in components) and **only lucide-react icons**.
 14. **API responses follow one envelope**: `{ success: true, data, meta? }` or `{ success: false, error: { code, message, fields? } }`.

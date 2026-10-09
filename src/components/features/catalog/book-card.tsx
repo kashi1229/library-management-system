@@ -5,11 +5,12 @@ import { motion } from "motion/react";
 import { BookCover } from "@/components/common/book-cover";
 import { AvailabilityBadge } from "@/components/features/catalog/availability-badge";
 import { StarRating } from "@/components/features/catalog/star-rating";
+import { WishlistToggle } from "@/components/features/wishlist/wishlist-toggle";
 import { cn } from "@/lib/utils";
 import type { CatalogBook } from "@/lib/api-client";
 
 /**
- * One book in the catalog grid (F5).
+ * One book in the catalog grid (F5, F10).
  *
  * The **whole card** is the link, not just the title. A card-sized target is the
  * difference between a comfortable grid and a fiddly one on a phone, and a title-only
@@ -21,15 +22,22 @@ import type { CatalogBook } from "@/lib/api-client";
  * Availability is overlaid on the cover rather than listed under the title: it is the
  * reason a reader picks one card over another, so it should be visible without
  * reading the metadata.
+ *
+ * `signedIn` decides whether the heart is offered at all rather than letting a visitor
+ * discover it only by tapping and being told to sign in. **The catalog browser does not read
+ * the session per card** — it is passed down once from the page, which is why this is a prop
+ * and not a `useSession()` inside twenty cards.
  */
 export function BookCard({
   book,
   priority = false,
+  signedIn = false,
   className,
 }: {
   book: CatalogBook;
   /** `true` for the first row, so `next/image` can eagerly load the LCP candidate. */
   priority?: boolean;
+  signedIn?: boolean;
   className?: string;
 }) {
   const href = `/catalog/${book.slug}`;
@@ -94,6 +102,27 @@ export function BookCard({
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 rounded-lg ring-0 transition-[box-shadow] group-focus-within:shadow-[inset_0_0_0_2px_var(--color-ring)]"
       />
+
+      {/*
+          * The heart sits **outside** the stretched link, absolutely positioned over the
+          * cover's top-right corner.
+          *
+          * That placement is the whole reason it works: the card is one large anchor, so a
+          * heart anywhere inside it would be a link to the book and would navigate on every
+          * tap — which is how "save this book" ends up opening the book. `WishlistToggle`
+          * also calls `preventDefault`/`stopPropagation`, so the card's own link handler
+          * cannot fire either.
+          *
+          * `wishlisted` came from the session via the catalog list reader, so the heart is
+          * correct on the first paint with no client fetch.
+          */}
+          <WishlistToggle
+            bookId={book._id}
+            bookTitle={book.title}
+            initialSaved={book.wishlisted}
+            signedIn={signedIn}
+            className="absolute top-2 end-2 z-10 bg-background/85 backdrop-blur-sm hover:bg-background"
+          />
     </motion.article>
   );
 }

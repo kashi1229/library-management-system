@@ -18,10 +18,11 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ROUTES } from "@/lib/constants";
 import { reservationsApi, toErrorMessage } from "@/lib/api-client";
+import { WishlistToggle } from "@/components/features/wishlist/wishlist-toggle";
 import type { CatalogBookDetail } from "@/types";
 
 /**
- * Reserve / Wishlist / Share on the detail page (F5, F8).
+ * Reserve / Wishlist / Share on the detail page (F5, F8, F10).
  *
  * ## Reserve is live
  *
@@ -31,21 +32,21 @@ import type { CatalogBookDetail } from "@/types";
  *
  * - **A copy is on the shelf** → "Borrow at the desk". Reserving would be wrong: rule 5 only
  *   permits it when there is no effective copy, and a copy sitting there is a copy they can
- *   have today. The button is not disabled either — it links to the catalog rather than
- *   dead-ending.
- * - **No copy, and they hold nothing** → "Reserve this book", plus the place they would get:
- *   `#queueLength + 1`. A number is what makes joining a queue a decision rather than a leap
- *   of faith, and it comes from the server (`queueLength`) rather than being invented here.
- * - **Waiting** → their live position, and a Cancel link. The cancel is a real request: a
- *   `ready` hold's release puts the copy straight back on the shelf.
+ *   have today. The button links to the desk rather than dead-ending.
+ * - **No copy, and they hold nothing** → "Reserve this book", plus the place they would get.
+ *   A number is what makes joining a queue a decision rather than a leap of faith, and it
+ *   comes from the server rather than being invented here.
+ * - **Waiting** → their live position, and a working Cancel. Cancelling a `ready` hold really
+ *   does put the copy back on the shelf, so pretending it worked would leave the book
+ *   reading "all copies out" to everyone else.
  * - **Ready** → a success panel with the server's countdown, because that is the only state
  *   on this page that requires the reader to *do* something.
  *
- * ## Wishlist is still not wired
+ * ## Wishlist is live too
  *
- * That is Unit 15. It keeps its label and says when it opens rather than shipping a control
- * that quietly does nothing — a button that appears to work and does not is worse than an
- * absent one.
+ * Unit 15 replaced the disabled placeholder with a real, optimistic heart. Its state comes
+ * from `userState.wishlisted`, which the server already computes from the session, so it is
+ * right on the first paint with no client fetch.
  *
  * Share works today, via the Web Share API on a touch device and a clipboard copy everywhere
  * else.
@@ -222,20 +223,22 @@ export function BookActions({
           </Button>
         ) : null}
 
+        {/*
+         * Wishlist. **Unit 15 wired this**, so it is a real control rather than the disabled
+         * placeholder it used to be — and it sits above the Add-to-wishlist row's old
+         * position because it is now an action rather than a notice.
+         *
+         * `book.userState.wishlisted` is computed server-side from the session, so the
+         * initial state is right on the first paint with no client fetch.
+         */}
         {signedIn ? (
-          <Button
-            variant="outline"
-            disabled
-            title="Wishlists open in a later release"
-            className="cursor-not-allowed"
-          >
-            {book.userState.wishlisted ? (
-              <BookmarkCheck className="size-4" aria-hidden="true" />
-            ) : (
-              <Bookmark className="size-4" aria-hidden="true" />
-            )}
-            {book.userState.wishlisted ? "On your wishlist" : "Add to wishlist"}
-          </Button>
+          <WishlistToggle
+            bookId={book._id}
+            bookTitle={book.title}
+            initialSaved={book.userState.wishlisted}
+            signedIn={signedIn}
+            variant="button"
+          />
         ) : null}
 
         <Button variant="ghost" onClick={share}>

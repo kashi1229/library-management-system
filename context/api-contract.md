@@ -33,7 +33,7 @@ Roles: **P** public, **M** member+, **S** staff (librarian|admin), **A** admin.
 > painting an "undefined books" card until the next revalidation.
 
 ## Books
-| GET | /books | P | Query: `q, category, language, availability(available\|all), yearFrom, yearTo, sort(newest\|title\|popular\|rating), status(S only), page, limit` |
+| GET | /books | P | Query: `q, category, language, availability(available\|all), yearFrom, yearTo, sort(newest\|title\|popular\|rating), status(S only), page, limit`. Every book carries `wishlisted` — `false` for an anonymous caller (Unit 15) |
 | GET | /books/:slugOrId | P | Detail + `effectiveAvailable`, `queueLength`, rating summary; `userState` (`wishlisted`, `activeLoan`, `reservation`) when signed in |
 | GET | /books/:id/related | P | Same category, excluding self (max 6), most-borrowed first |
 | GET | /books/facets | P | Category counts + icon/accent, languages present, publication year bounds |
@@ -76,8 +76,12 @@ Notes added in Units 08–09:
 - **`userState` is derived from the session user id only** — never from the request body
   (invariant 3). An anonymous caller gets `{wishlisted:false, activeLoan:false,
   reservation:null, reservationId:null, reservationPosition:null, readyHoldHours:null}`.
-- **Archived books 404** on `/books/:id` and `/books/:id/related` for non-staff, so the
-  archive is not enumerable through either route.
+- **Archived books 404** on `/books/:id`, `/books/:id/related` and `/books/:id/reviews` for
+  non-staff — and on `/reviews` for **everyone**, staff included, so the archive is not
+  enumerable through any of the three.
+- **`wishlisted` on the list is resolved in one query from the session** (Unit 15), not per
+  book. It is a required field on `CatalogBook`, so a serialiser that omitted it would fail
+  to type-check rather than quietly render twenty unsaved hearts.
 - **The availability badge says "None available", not "All N out"** (Unit 14). The `available`
   it receives is already `effectiveAvailable`, so on a two-copy book with one copy on loan and
   the other held for somebody, "All 2 out" is false — one of them is on a shelf with a name on
@@ -170,12 +174,33 @@ Notes added in Unit 14:
   filtering cannot change the figures on the KPI cards.
 
 ## Wishlist & Reviews
-| GET | /wishlist | M | |
-| POST | /wishlist | M | `{ bookId }` toggle-safe (idempotent add) |
-| DELETE | /wishlist/:bookId | M | |
-| GET | /books/:id/reviews | P | Paginated |
-| POST | /books/:id/reviews | M | Create or update own `{ rating, comment }` |
-| DELETE | /reviews/:id | M (own) / S | |
+| GET | /wishlist | M | `items[]` of full `CatalogBook`; member from session only |
+| POST | /wishlist | M | `{ bookId }` idempotent add; archived book refused |
+| DELETE | /wishlist/:bookId | M | Idempotent; member from session only |
+| GET | /books/:id/reviews | P | Paginated; `summary` over **all** reviews + `mine` |
+| POST | /books/:id/reviews | M | Create or update own `{ rating 1-5, comment? }` |
+| DELETE | /reviews/:id | M (own) / S | Returns the recomputed `summary` |
+
+- **The member is resolved from the session and there is no member id in any payload.** A
+  `memberId` query param on `/wishlist` is ignored; editing the URL cannot read somebody
+  else's reading list.
+- **Both wishlist writes are idempotent.** Re-saving a saved book and re-removing a removed
+  one both succeed rather than conflicting, because a double-click and a retried request are
+  the same event from the client's point of view.
+- **`POST /books/:id/reviews` upserts.** There is no separate edit route: a second post for
+  the same member and book edits the existing row, enforced by the
+  `review_one_per_member_book` unique index. A 409 "you already reviewed this" would be the
+  wrong answer for the one person the feature exists to serve.
+- **Eligibility is any loan of that book in any state**, including a returned one. Refused
+  with a 400 naming the action; a suspended member is refused as suspended.
+- **`summary.average` is rounded to one decimal**, `summary.count` is the real total, and
+  `summary.distribution` is **five integers with index 0 = one star**. All three are aggregated
+  over the whole collection, so `?limit=2` returns the same summary as the full page.
+- **`mine` is returned on every page**, so the composer can offer an edit without scanning
+  the visible rows; it is `null` for an anonymous caller.
+- **An archived book 404s on `/books/:id/reviews` for everyone**, staff included.
+- **Staff removal is audited** with `moderated: true` and the average and count the book was
+  left at; a member deleting their own review writes the same action with `moderated: false`.
 
 ## Notifications
 | GET | /notifications | M | `unreadOnly, page`; `meta.unreadCount` |

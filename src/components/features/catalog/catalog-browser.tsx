@@ -40,7 +40,20 @@ const PAGE_SIZE = 12;
  * `keepPreviousData` is not used: showing stale results while the filter changes
  * reads as "the filter did nothing", which is worse than a brief skeleton.
  */
-export function CatalogBrowser({ facets }: { facets: CatalogFacets }) {
+export function CatalogBrowser({
+  facets,
+  signedIn = false,
+}: {
+  facets: CatalogFacets;
+  /**
+   * Whether anybody is signed in, resolved on the server by the page.
+   *
+   * Passed down rather than fetched per card: the catalog grid can hold twenty cards, and a
+   * session request in each of them would be twenty round trips to learn one boolean the
+   * page already knows.
+   */
+  signedIn?: boolean;
+}) {
   const filters = useCatalogFilters();
   const reduced = usePrefersReducedMotion();
 
@@ -203,7 +216,12 @@ export function CatalogBrowser({ facets }: { facets: CatalogFacets }) {
             >
               {books.map((book, index) =>
                 view === "grid" ? (
-                  <BookCard key={book._id} book={book} priority={index < PAGE_SIZE && index < 6} />
+                  <BookCard
+                    key={book._id}
+                    book={book}
+                    priority={index < PAGE_SIZE && index < 6}
+                    signedIn={signedIn}
+                  />
                 ) : (
                   <BookListRow key={book._id} book={book} />
                 ),

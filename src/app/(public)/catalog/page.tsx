@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getCatalogFacets } from "@/lib/services/books";
+import { getSession } from "@/lib/auth/session";
 import { CatalogBrowser } from "@/components/features/catalog/catalog-browser";
 
 export const metadata: Metadata = {
@@ -37,11 +38,20 @@ export const dynamic = "force-dynamic";
  * than a 500 that hides the books entirely.
  */
 export default async function CatalogPage() {
-  const facets = await getCatalogFacets().catch(() => ({
-    categories: [],
-    languages: [],
-    yearRange: { from: 2000, to: new Date().getFullYear() },
-  }));
+  const [facets, session] = await Promise.all([
+    getCatalogFacets().catch(() => ({
+      categories: [],
+      languages: [],
+      yearRange: { from: 2000, to: new Date().getFullYear() },
+    })),
+    /*
+     * The **cookie only** — no database round trip. The page is public and must stay cheap
+     * for an anonymous crawl, and all this needs is whether to offer the wishlist heart at
+     * all. Nothing that decides permissions is read from here; the cards' `wishlisted` flag
+     * comes from the authenticated list request.
+     */
+    getSession().catch(() => null),
+  ]);
 
-  return <CatalogBrowser facets={facets} />;
+  return <CatalogBrowser facets={facets} signedIn={Boolean(session)} />;
 }

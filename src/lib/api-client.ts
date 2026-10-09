@@ -34,7 +34,11 @@ import type {
   LoanReturnResult,
   LoanSummary,
   MemberReservations,
+  RatingSummary,
   ReservationSummary,
+  ReviewListResult,
+  ReviewSummary,
+  WishlistItem,
 } from "@/types";
 
 /**
@@ -663,6 +667,62 @@ export const reservationsApi = {
     request<{ reservation: ReservationSummary; loan: LoanSummary }>(
       `/reservations/${id}/fulfil`,
       { method: "POST" },
+    ),
+};
+
+/* -------------------------------------------------------------------------- */
+/* Wishlist & Reviews (spec 15)                                                */
+/* -------------------------------------------------------------------------- */
+
+/** Wire shapes are declared once in `types/index.ts`; re-exported here for components. */
+export type { RatingSummary, ReviewListResult, ReviewSummary, WishlistItem } from "@/types";
+
+/** Mirrors `upsertReviewSchema`. `rating` is coerced server-side. */
+export type ReviewInput = {
+  rating: number;
+  comment?: string;
+};
+
+export const wishlistApi = {
+  /** The signed-in user's saved books. No id — resolved from the session. */
+  list: (signal?: AbortSignal) => request<{ items: WishlistItem[] }>("/wishlist", { signal }).then((d) => d.items),
+
+  /**
+   * **Idempotent.** Saving a book that is already saved returns the existing row rather
+   * than a conflict, because the heart is a toggle and a double-click must not strand the
+   * member in a state they cannot get out of.
+   */
+  add: (bookId: string) =>
+    request<{ item: WishlistItem }>("/wishlist", { method: "POST", body: { bookId } }).then(
+      (d) => d.item,
+    ),
+
+  /** Idempotent too — unsaving a book that is not saved succeeds. */
+  remove: (bookId: string) => request<{ id: string }>(`/wishlist/${bookId}`, { method: "DELETE" }),
+};
+
+export const reviewsApi = {
+  /**
+   * **Public.** Works signed out; `isMine` / `canModerate` are false for a visitor.
+   * `mine` is the caller's own review on **any** page, so the composer can always edit it.
+   */
+  list: (bookId: string, page = 1, limit = 10, signal?: AbortSignal) =>
+    requestWithMeta<ReviewListResult>(`/books/${bookId}/reviews`, {
+      query: { page, limit },
+      signal,
+    }),
+
+  /** Create **or** update the caller's own review — one endpoint, because one review. */
+  upsert: (bookId: string, input: ReviewInput) =>
+    request<{ review: ReviewSummary }>(`/books/${bookId}/reviews`, {
+      method: "POST",
+      body: input,
+    }).then((d) => d.review),
+
+  /** Own review, or anyone's as staff. Returns the book's recomputed rating summary. */
+  remove: (reviewId: string) =>
+    request<{ summary: RatingSummary }>(`/reviews/${reviewId}`, { method: "DELETE" }).then(
+      (d) => d.summary,
     ),
 };
 

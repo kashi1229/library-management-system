@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { handler, ok, parseBody, parseQuery } from "@/lib/api";
 import { getSession, requireStaff } from "@/lib/auth/session";
 import { createBook, listBooks } from "@/lib/services/books";
@@ -21,7 +22,14 @@ export const GET = handler(
     const isStaff = session !== null && (session.role === "librarian" || session.role === "admin");
 
     const status = isStaff ? query.status : "active";
-    const { items, meta } = await listBooks({ ...query, status });
+
+    // The session user id goes to `listBooks` so each card can carry its own `wishlisted`
+    // flag — one query for the whole page, not one per card. It comes from the **cookie
+    // only** (invariant 3), never from a query parameter, so nobody can ask which books a
+    // given member has saved.
+    const userId = session ? new Types.ObjectId(session.sub) : undefined;
+
+    const { items, meta } = await listBooks({ ...query, status }, userId);
 
     return ok({ items }, meta);
   },

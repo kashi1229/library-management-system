@@ -10,10 +10,12 @@ import { CategoryIconTile } from "@/components/common/category-icon-tile";
 import { AvailabilityBadge } from "@/components/features/catalog/availability-badge";
 import { StarRating } from "@/components/features/catalog/star-rating";
 import { BookActions } from "@/components/features/catalog/book-actions";
+import { ReviewsSection } from "@/components/features/reviews/reviews-section";
 import { ReadMore } from "@/components/features/catalog/read-more";
 import { ROUTES } from "@/lib/constants";
 import { Types as MongooseTypes } from "mongoose";
 import { cloudinaryUrl } from "@/lib/cloudinary-shared";
+import { Loan } from "@/models";
 import type { CatalogBook } from "@/types";
 
 type Params = { params: Promise<{ slug: string }> };
@@ -73,6 +75,24 @@ export default async function BookDetailPage({ params }: Params) {
   }
 
   if (book.status === "archived" && !isStaff) notFound();
+
+  /*
+   * Business rule 9 read **here**, once, on the server.
+   *
+   * "Has this member borrowed this book" is checked against the `Loan` collection — the one
+   * source of truth — and passed to the client as `canReview`. Re-deriving it in a component
+   * would be a second implementation of the rule, and the two would disagree the first time a
+   * loan was returned while the page was open. The composer's own submit is still guarded by
+   * the server, because a client-side preview enables a control and never blocks one.
+   */
+  const canReview = session
+    ? Boolean(
+        await Loan.exists({
+          book: new MongooseTypes.ObjectId(book._id),
+          member: new MongooseTypes.ObjectId(session.sub),
+        }),
+      )
+    : false;
 
   const related = await listRelatedBooks(slug, 6).catch(() => [] as CatalogBook[]);
 
@@ -208,9 +228,23 @@ export default async function BookDetailPage({ params }: Params) {
             </section>
           ) : null}
 
+{/*
+          * Reviews sit **above** "More in <category>". What other readers made of this book
+          * is part of deciding whether to borrow it; which neighbours to browse next is not.
+          * Placing them last would mean scrolling past six unrelated covers to reach the
+          * thing the page is actually for.
+          */}
+          <ReviewsSection
+            bookId={book._id}
+            bookTitle={book.title}
+            signedIn={Boolean(session)}
+            role={session?.role ?? "member"}
+            canReview={canReview}
+          />
+
           {related.length > 0 ? (
             <section aria-labelledby="related" className="space-y-4">
-              <h2 id="related" className="text-h3 font-display font-semibold text-foreground">
+              <h2 id="related" className="font-display text-h3 font-semibold tracking-[-0.02em] text-foreground">
                 More in {book.category.name}
               </h2>
               <ul className="grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-6">

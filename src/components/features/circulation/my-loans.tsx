@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Clock } from "lucide-react";
+import { Clock, Star } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -212,11 +212,25 @@ export function MyLoanHistoryRow({ loan }: { loan: LoanSummary }) {
         </p>
       </div>
 
-      {/* Wired in Unit 15 (reviews). Labelled now so the row does not grow an icon with no
-          behaviour later. */}
-      <Button variant="ghost" size="sm" disabled title="Available in a later release">
-        Write a review
-      </Button>
+      {/*
+          * "Write a review" is **live** (Unit 15). It is a link to the book page's review
+          * section rather than a control on this page: reviewing is the one member action
+          * that needs the book's context beside it — the rating summary, the reviews it would
+          * join, and the borrow history that makes them eligible. A dialog here would put
+          * a star picker in a window with none of that, and would need its own copy of the
+          * eligibility rule.
+          *
+          * Returned books only, and only for a book that still has a slug to navigate to —
+          * a deleted book would take the member to a 404 from a button labelled "review".
+          */}
+      {loan.book.slug ? (
+        <Button variant="ghost" size="sm" asChild>
+          <Link href={`/catalog/${loan.book.slug}#reviews`}>
+            <Star className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
+            Write a review
+          </Link>
+        </Button>
+      ) : null}
     </li>
   );
 }

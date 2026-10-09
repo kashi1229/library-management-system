@@ -108,8 +108,24 @@ Partial unique idx `{ book, member }` where status in (`waiting`,`ready`). Queue
 ## Wishlist (`wishlists`)
 `{ member ref, book ref }`, unique compound idx `{ member, book }`.
 
+- **The unique index is what makes the write idempotent.** A double-click or a retried request
+  finds the row instead of inserting a second one, so `POST /wishlist` can succeed on an
+  already-saved book rather than conflicting (Unit 15).
+
 ## Review (`reviews`)
 `{ book ref idx, member ref idx, rating 1..5, comment string ≤1000 }`, unique compound `{ book, member }`.
+
+- **The unique index expresses business rule 9's companion rule — one review per member per
+  book — so it is enforced by the database, not by a check-then-insert in the service.** That
+  check would lose a race between two simultaneous posts. The service handles the collision by
+  *adopting and editing* the row the winner created, rather than returning an error to a
+  request that succeeded in substance (Unit 15).
+- **`comment` is stored as `null`, never `""`.** The validator trims, so a whitespace-only
+  comment would otherwise be persisted as an empty string and the collection would hold two
+  representations of "rated it, wrote nothing". The UI renders *"No comment left."* for both.
+- **`Book.ratingAvg` / `ratingCount` are denormalised aggregates**, recomputed in the same
+  transaction as the write from an aggregation over the collection — not adjusted from the row
+  in hand, which a concurrent write would invalidate.
 
 ## Notification (`notifications`)
 `{ user ref idx, type enum, title, message, link (string optional), readAt (Date|null), dedupeKey (string unique sparse) }`, idx `{ user, readAt, createdAt:-1 }`.
