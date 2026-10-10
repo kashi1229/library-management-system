@@ -1,13 +1,13 @@
 import "server-only";
 import { Types } from "mongoose";
-import { Book, Category, Fine, Loan, Reservation, User, Wishlist, AuditLog } from "@/models";
+import { Book, Fine, Loan, Reservation, User, Wishlist, AuditLog } from "@/models";
 import { startOfDay, subDays } from "date-fns";
+import type { CategoryColor } from "@/lib/constants";
 import { activeQueuePositions, hoursUntil } from "@/lib/services/reservations";
 import { bookRefOr, bookRefs, memberRefOr, memberRefs } from "@/lib/services/refs";
 import { deriveLoanState } from "@/lib/services/circulation";
 import type {
   DashboardDayPoint,
-  DashboardLowStockItem,
   MemberDashboard,
   StaffActivityItem,
   StaffDashboard,
@@ -289,7 +289,10 @@ export async function getStaffDashboard(): Promise<StaffDashboard> {
       },
     ]),
 
-    Book.aggregate<{ _id: Types.ObjectId; name: string; count: number }>([
+    // **`color` comes out of the same `$lookup`**, so the donut needs no second query for it.
+    // The WIP version exported a separate `categoryColours()` for this, which meant a whole extra
+    // round trip and a second place for a category's hue to be wrong.
+    Book.aggregate<{ _id: Types.ObjectId; name: string; color: CategoryColor; count: number }>([
       { $match: { status: "active" } },
       {
         $lookup: {
@@ -304,6 +307,7 @@ export async function getStaffDashboard(): Promise<StaffDashboard> {
         $group: {
           _id: "$cat._id",
           name: { $first: "$cat.name" },
+          color: { $first: "$cat.color" },
           count: { $sum: "$borrowCount" },
         },
       },
@@ -354,6 +358,7 @@ export async function getStaffDashboard(): Promise<StaffDashboard> {
     byCategory: categoryShares.map((share) => ({
       id: String(share._id),
       name: share.name,
+      color: share.color,
       count: share.count,
     })),
     topBooks: topBooks.map((book) => ({
@@ -441,18 +446,3 @@ function zeroFill(
 
 /** Re-exported so the member card and the staff donut share one definition of a loan state. */
 export { deriveLoanState };
-
-/**
- * Category colours for the donut, resolved server-side.
- *
- * **Returned as the stored `CategoryColor` name rather than a CSS class or a hex value**, so
- * the component can map it through the same `CATEGORY_COLOR_CLASS` every other surface uses.
- * Passing a colour string from here would create a second definition of "what colour is plum".
- */
-export async function categoryColours(): Promise<Map<string, string>> {
-  const rows = await Category.find({})
-    .select("_id color")
-    .lean<Array<{ _id: Types.ObjectId; color: string }>>();
-
-  return new Map(rows.map((row) => [String(row._id), row.color]));
-}

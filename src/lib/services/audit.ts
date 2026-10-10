@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import { AuditLog } from "@/models";
 import type { Actor } from "@/types";
 import type { ClientSession } from "mongoose";
+import type { AuditAction } from "@/lib/audit-templates";
 
 /**
  * Append-only audit trail.
@@ -13,38 +14,15 @@ import type { ClientSession } from "mongoose";
  * reservation fulfil/cancel by staff, and settings changes.
  */
 
-export type AuditAction =
-  | "user.create"
-  | "user.suspend"
-  | "user.activate"
-  | "user.password_reset"
-  | "user.password_change"
-  | "team.create"
-  | "team.update"
-  | "category.create"
-  | "category.update"
-  | "category.delete"
-  | "book.create"
-  | "book.update"
-  | "book.archive"
-  | "book.restore"
-  | "book.delete"
-  | "book.bulk_archive"
-  | "loan.issue"
-  | "loan.return"
-  | "loan.renew"
-  | "reservation.create"
-  | "reservation.cancel"
-  | "reservation.fulfil"
-  | "reservation.expire"
-  | "fine.create"
-  | "fine.collect"
-  | "fine.waive"
-  | "review.create"
-  | "review.update"
-  | "review.delete"
-  | "settings.update"
-  | "maintenance.run";
+/**
+ * The action union lives in `lib/audit-templates.ts`, **not here.**
+ *
+ * It sits next to the icon map that draws it, because that map must be a total `Record` — adding
+ * an action without drawing it is a compile error, which is only possible if both halves can be
+ * seen from one module. A Client Component cannot import this file (`server-only`), so the
+ * dependency had to point the other way: the service is the importer, not the definer.
+ */
+export type { AuditAction };
 
 export type LogAuditInput = {
   actor: Actor;

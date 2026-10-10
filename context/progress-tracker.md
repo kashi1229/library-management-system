@@ -3,33 +3,246 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, reservations, wishlist/reviews.**
-  Units 01–15 complete. **Unit 16 committed as WIP** (one known defect, see below).
-  **Unit 17 started, unverified.** Units 17 → 21 to go.
+- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, reservations, wishlist/reviews, notifications, dashboards.**
+  Units 01–15 complete and verified. **Unit 16 committed as WIP** (one known defect, see below).
+  **Unit 17 complete and verified.** Units 18 → 21 to go.
 
 ## Current Goal
-- **Unit 17 (Dashboards) is written and building, but NOT verified.** `tsc`, `eslint` and
-  `next build` are clean and both routes are in the build output; **no figure has been compared
-  to a live database**, because MongoDB was stopped for the whole of the session's verification
-  work and restarting it needs elevation. Do not treat any dashboard number as correct yet.
-- Build Units 17 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- **Unit 17 (Dashboards) is complete.** The WIP backend commit is now verified end to end against
+  a live MongoDB, and the whole UI is written: both dashboards, the charts, the lists, the
+  skeletons and the empty states. `tsc`, `eslint` and `next build` are clean, and the browser
+  pass is green. **Every KPI on both dashboards has been compared to a direct database count.**
+- Build Units 18 → 21 in dependency order (see `context/specs/00-build-plan.md`).
 - **Unit 16 still has one open defect** — `POST /api/maintenance/run` intermittently aborts its
-  transaction. See the WIP section for the narrowed cause and the concrete next step.
+  transaction. See the WIP section for the narrowed cause and the concrete next step. It does
+  not block anything; Unit 17 depends only on the lazy trigger, which works.
 
 ## Open — needs the developer's machine
 
-- **MongoDB is stopped, and `Start-Service MongoDB` needs an elevated prompt.** Running
-  `mongod.exe` directly does not work either: its configured `dbPath` and log path are under
-  `C:\Program Files\MongoDB\Server\8.0\`, which is not writable without elevation. The failing
-  requests show `MongoServerSelectionError: connect ECONNREFUSED 127.0.0.1:27017`.
-  - **Fix:** `net start MongoDB` from an elevated prompt, or Start it in Services.
-  - **This blocks Unit 17's entire verification**, whose first spec check is *"All KPI numbers
-    match direct database counts"* — impossible without a database.
-  - **Unit 16's results are still valid.** Its verification completed while MongoDB was up; only
-    work attempted after it went down is unverified. The database was already down when this
-    session began, not caused by any change here.
+- **None.** MongoDB is running again (the developer started it), and Unit 17's verification —
+  which had been blocked on it for the whole of the previous session — is done.
+- **Unit 16's maintenance defect is still open**, and still needs a decision rather than
+  access. See the WIP section.
 
 ## Completed
+
+### Unit 17 — Dashboards ✅ · `feat/17-dashboards-ui`
+**Status: complete.** The previous session's WIP commit (service + 2 routes + types) was verified
+against a live MongoDB before any UI was written, then the entire UI was built on top of it.
+
+#### The WIP backend is now verified — 52/52 API checks against direct database counts
+- **Every one of the nine staff KPIs matches a count read straight out of MongoDB in the same
+  process that then called the API.** Not "the number looked plausible" — the same run does
+  `Book.countDocuments`, the `$sum` pipelines and the `$dateToString` group, then compares.
+- **The 30-day series is proved as arithmetic, not as "a chart appeared".** It sums to the loan
+  count in the window, has no duplicate dates, starts and ends on exactly the right days, each
+  day the `$group` actually returned carries the same count, and **25 of its 30 days are zero**.
+  That last one is the point: a `$group` returns only days that had loans, so an unfilled chart
+  draws a straight line across a quiet fortnight and makes the library look steadily busy. The
+  gaps are the information.
+- **Authorisation, in the browser and over the API**: anonymous 401 on both routes, a member 403
+  on `/staff`, a suspended member 200 on their own dashboard and 403 on the staff one, and two
+  different members see different numbers. There is no member id in either request.
+- **Member isolation is a real check, not a tautology**: a second member's dashboard is fetched
+  and compared, and recommendations are checked against the borrowed set in the `$nin`.
+
+#### UI — member `/dashboard`
+- **Serif greeting with the date, then the pickup banner, then three KPI cards, then the shelf
+  of books out on loan, then two shelves of recommendations.** The order is the argument: a hold
+  has a window, so it is above the fold; "do I need to go to the desk today?" is the question a
+  member opens this page to answer.
+- **The greeting is computed in the browser, not on the server.** Rendered server-side, `new
+  Date()` is the *server's* clock — a librarian in Auckland opening the library at 9am would be
+  greeted by an afternoon heading built on a UTC box. The server paints a neutral "Welcome back"
+  that is never wrong, and the slot fills in on the next frame from `useSyncExternalStore`, with
+  the layout unchanged so nothing shifts.
+- **The three cards are whole-card links, not a card with a link in its hint.** The first version
+  put "See your loans" in the hint line, where it looked like a caption and was smaller than the
+  label it explained. A member should not have to find the clickable part.
+- **Reuses `CountdownRing` and does not build a second countdown.** The ring already encodes the
+  urgency-to-colour rule against the same `daysLeft` the loan rows use, so a dashboard ring and a
+  loan-row badge cannot disagree about the same book. **The urgency is also spelled out in
+  words** — a ring shows *that* a book is nearly due; "Due tomorrow" says what to do about it.
+- **Loan period comes from `getSettings()` and is passed down**, never guessed, so the ring's arc
+  scales against real policy and stays correct the day an admin changes it.
+- **Empty states are real.** A member with nothing out gets a sentence and a route to the
+  catalog, not an empty grid; a member with no holds gets no banner at all, and one with an empty
+  wishlist gets no wishlist panel — a permanent "nothing here" block on the screen every member
+  meets first is a dead panel, and the link is already in the sidebar and the tab bar.
+
+#### UI — staff `/staff`
+- **Eight KPI cards split into two groups, because the eight numbers are not the same kind of
+  number.** The first row is the size of the library — tallies that are never "wrong". The second
+  is *"Needs attention"*: what needs a decision today, and it only takes a colour when it is
+  non-zero. Flattened into one grid, a librarian scanned eight identical cards and had to work
+  out which two mattered.
+- **Charts, in `chart-frame.tsx`'s shared shell** so the three cannot drift in padding, header
+  weight or height: the 30-day area, the category donut, and the top-five bars.
+- **`TopBooksBars` is HTML, not recharts.** Five labelled rows with a proportional fill are a list
+  with a width on it; SVG would mean a truncation algorithm, a custom tooltip and a legend in
+  exchange for nothing. A vertical bar chart would also have turned five titles into five rotated,
+  clipped labels — horizontal bars give each title the full column and the comparison becomes
+  length, which is the one thing a bar chart is good at.
+- **The activity feed shows the `summary` recorded at the time of the action**, never re-derived
+  from a document that may since have been deleted. The audit log is append-only and never
+  pruned, so it outlives the books it describes; re-joining to a live `Book` would blank the row
+  for exactly the events an administrator most wants to read.
+- **`lib/audit-templates.ts`** — icon and tone per audit action, as a total `Record`, with the
+  `AuditAction` union moved **out of** `services/audit.ts` **into** it. That direction is the
+  reverse of Unit 16's notification types, and deliberately: the map must be importable by a
+  Client Component, and a `"server-only"` module cannot be. A service importing a client-safe
+  types module is fine; the reverse fails the build. Adding an action without drawing it is a
+  **compile error**, not a blank tile.
+- **Skeletons match the real layouts**, which the shared `PageSkeleton` did not: it renders its
+  KPI row at `lg:grid-cols-4`, and the member dashboard has three cards at `lg:grid-cols-3` while
+  staff has eight. Loading the member page therefore shifted sideways, and staff shifted down by
+  a whole card height.
+
+#### The chart-colour rule, and why it needed a hook
+- **Recharts needs colour *values*, not class names.** Every other surface in this app colours
+  itself with a token class and lets the cascade resolve it; SVG `fill`/`stroke` cannot take a
+  class, so a chart handed `fill="bg-primary"` paints nothing. Hardcoding hex is forbidden by
+  `ui-context.md` and would be wrong twice — the light value would leak into dark mode, and both
+  would drift from `globals.css` the first time a token was retuned.
+- **`useChartTokens()` reads the live custom properties through `getComputedStyle`**, which is
+  the only place the real value exists, and re-reads them when `next-themes` changes the class on
+  `<html>`. It is built on `useSyncExternalStore` rather than `useEffect` + `setState` for two
+  reasons: this codebase treats React 19's `react-hooks/set-state-in-effect` as a real defect,
+  and `getServerSnapshot` returning `null` is what makes hydration correct — the server cannot
+  measure the cascade, so it paints a same-size skeleton and React swaps in the real tokens on
+  the next frame, with no mismatch.
+- **The snapshot is cached against the theme key.** `useSyncExternalStore` compares snapshots with
+  `Object.is`; returning a freshly built object each call reports a change every render and spins
+  React forever.
+- **Category colours ride the same path but are theme-independent by design** — the hues live in
+  `:root` and are never flipped, because a category's colour is its identity and must not change
+  at night. Verified: the donut's slice fills are identical in light and dark.
+- **`byCategory` now carries the category's `color` in the payload**, pulled out of the *same*
+  `$lookup` the name comes from. The WIP version exported a separate `categoryColours()` for it,
+  which meant a whole extra round trip and a second place for a category's hue to be wrong.
+
+### Unit 17 — bugs found by the browser pass
+Found the way Unit 07's truncated names and Unit 14's clipped action column were found: **every
+DOM assertion passed while the page was broken.** These three had a green test suite.
+
+- **The member dashboard rendered an error boundary.** Two causes, both invisible to `tsc` and to
+  `next build`, because neither is a type error:
+  1. **`StatCard` is a Client Component and takes an `icon` prop.** A Lucide icon is a
+     *function*, and React's server-to-client boundary serialises data, not functions. A Server
+     Component passing `icon={BookMarked}` produces *"Only plain objects can be passed to Client
+     Components"*, and the page throws. `member-dashboard.tsx` and `staff-dashboard.tsx` are now
+     both `"use client"`, matching `features/members/member-header.tsx`, which already was for
+     the same reason. The staff half got this right first time; the member half did not.
+  2. **`GreetingHeader` used `useSyncExternalStore` without `"use client"`** — the other half of
+     the same mistake, giving `TypeError: useSyncExternalStore only works in Client Components`.
+- **The "Loans per day" chart rendered nothing at all.** recharts 3.10.1's `isAnimationActive`
+  draws the path correctly in the DOM — `getTotalLength()` returns 1240, the stroke is a real
+  colour, nothing clips it — and then paints **nothing**, because the reveal animation drives a
+  clip-path that never opens. **Every assertion about it passed**: the path existed, the tooltip
+  worked on hover *and* on touch, and all twelve axis labels were there. `animationDuration` is
+  not the trigger — it fails with and without it. Recharts' internal animation is now off and
+  `ChartReveal` does a fade + 8px rise on first view using the project's own `fadeUp` variant,
+  which is what `code-standards.md` requires anyway. **Only reading the screenshot caught this.**
+- **The member dashboard had a 197px horizontal scrollbar at 360px**, caused by an `sr-only`
+  span reading "Open in the catalog". `sr-only` is `position: absolute`; with no positioned
+  ancestor it resolves against the **initial containing block**, so it escaped the horizontal
+  scroller's clip and widened the document. An accessibility caption was breaking the layout, and
+  the caption was redundant — the title is already the link's accessible name. Removed from both
+  shelves.
+- **Two smaller layout bugs the same pass found**: a `shrink-0` caption beside a long heading
+  ("Recommended for you" + "Based on what you have borrowed") pushed the member page 115px wider
+  than a 360px screen; and the shelf's edge fade was positioned 16px *inside* the first card, so
+  the first cover rendered visibly washed out. An affordance that dims the thing it advertises is
+  worse than none.
+- **The donut legend truncated to `Science …` and `QA Notic…`** and listed five rows of `0% 0`.
+  Five shelves nobody has visited is not information, and it crowded out the two categories that
+  matter. Now: only categories with loans, one column so the names fit, and one honest line for
+  the rest — with a "a capped list must say it is capped" count if there are more than six.
+
+### Unit 17 — harness lessons
+- **`documentElement.scrollWidth` is not "can this page scroll sideways".** It reported 557 for a
+  360px page that could not be scrolled at all — `window.scrollX` stayed 0, `body.scrollWidth`
+  was 360, and no unclipped element crossed the viewport. It counts fixed-position descendants
+  the user can never reach. The check is now: scroll, then see whether the page moved.
+- **Puppeteer's `clip` is in document coordinates, and this page has `scroll-behavior: smooth`.**
+  Scroll offsets, `getBoundingClientRect()` and `clip` together produced crops of entirely the
+  wrong region — three attempts "cropped the chart" and returned the KPI row. The reliable way to
+  crop is to make the viewport as tall as the page and never scroll.
+- **Hovering needs two `mouse.move` calls with `steps`.** A single jump can land before the chart
+  has attached its listeners, and the tooltip reads as "broken" when it is fine.
+- **`elementFromPoint` only resolves coordinates inside the viewport.** The donut sits at
+  y≈1180 in a 900px window, so every probe returned `null` and the chart read as dead. Scroll it
+  into view first.
+- **`getComputedStyle` returns custom properties unresolved**, so `--cat-plum` arrives as
+  `#6b3e5e` and not `rgb(107, 62, 94)`. An assertion demanding `rgb(` fails on a correct chart.
+- **`className` on an SVG element is an `SVGAnimatedString`**, so `getAttribute` on a recharts
+  tick returns something the CSS selector never matched — the axis looked empty while it had
+  twelve labels. Assert on the rendered **text**.
+- **`browser.newPage()` shares cookies across tabs**, so the second persona's `/login` redirected
+  to their dashboard and the email input was not there. Each persona needs its own
+  `createBrowserContext()`.
+- **A hand-written expected total is a guess about a database other tests mutate**, and a wrong
+  one reads exactly like a real bug (Unit 15). The browser pass now reads its expectations from
+  the API, and `api-check.mjs` has already proved API == direct database counts, so the chain
+  DOM == API == database closes without a hard-coded number anywhere.
+- **A bisect that hides elements in document order only ever reports ancestors**, which is no
+  information at all. Sort the candidates deepest-first to find the element that is actually
+  responsible — that is how the `sr-only` span was found.
+- **A screenshot of a full page catches charts that have not been revealed yet.** `whileInView`
+  only fires once an element has been in the viewport, so a capture at scroll position 0 shows
+  every below-the-fold card at `opacity: 0`, and an unrevealed chart and a broken chart look
+  identical. Walk the page before capturing, as a reader does.
+- **`whileInView` with a negative viewport margin is wrong for anything that is not a person.**
+  `-10%` meant a chart had to be 10% inside the viewport before it appeared, so full-page
+  screenshots, print, and any reader who jumps to the bottom all saw blank cards. `amount: 0`
+  reveals on the first pixel.
+
+### Unit 17 — spec checklist, ticked against the running app
+- [x] All KPI numbers match direct database counts (spot-check three).
+      *Not spot-checked — all nine staff KPIs and all three member KPIs, read from MongoDB in the
+      same process that then called the API.*
+- [x] 30-day series zero-fills days and totals equal the loans count in the range.
+      *Proved as arithmetic: the series sums to the count, has 30 unique dates on exactly the
+      right days, matches the `$group` day by day, and keeps 25 of its 30 zeros.*
+- [x] Member dashboard shows only that member's data; recommendations exclude already-borrowed books.
+      *Two members fetched and compared; a second member's dashboard is a different set of
+      numbers, and no recommended book is in the borrowed set.*
+- [x] Charts readable and correctly colored in light and dark; tooltips work on touch.
+      *Tooltip verified on hover **and** via a dispatched `Input.dispatchTouchEvent`; `--primary`
+      flips in dark mode; category slices keep their fixed hues in both themes.*
+- [x] Layout adapts 360px → 1440px; no horizontal scroll.
+      *Checked by scrolling, not by reading `scrollWidth` — see the harness lessons.*
+- [x] No TypeScript/console errors · `npm run build` passes.
+
+### Unit 17 — deliberately not done
+- **`dashboardApi` in `api-client.ts`.** Both pages are Server Components calling the service
+  directly, which `code-standards.md` prefers for reads with no interactivity. A client fetcher
+  with no caller is dead code.
+- **A "no data" demo state for the charts.** The empty state exists and is verified on a member
+  with no history; proving it on the staff chart needs a database with no loans, which is not
+  this developer's database.
+- **A heart on the recommendations.** The wishlist shelf shows books the member has already
+  saved, so the answer is known. A heart on a recommendation would need the service to resolve
+  wishlist state for eight more books, which the spec does not ask for — and the member clicks
+  through to the catalog card, which has one. This is the Unit 07 lesson about a grid of
+  controls that all answer "sign in" applied in reverse: no control is better than a control that
+  cannot work.
+- **Per-category drill-down from the donut**, and a date-range picker on the area chart. Neither
+  is in the spec; the range is `seriesDays` from the service and the legend is the whole dataset.
+
+### Unit 17 — harness notes for the next unit
+- **`qa17/` is excluded locally, not committed.** The API harness, the fixture seed and the
+  browser pass live in a folder listed in `.git/info/exclude`, so they never reach a commit and
+  never leak a fixture flag into the repo. `puppeteer-core` is installed in the temp directory, so
+  **the project gains no dependency** (Unit 15's rule).
+- **The fixtures are tagged `qa17` and reversible.** `qa17.seed.mjs` writes users
+  (`qa17.reader`, `qa17.clean`, `qa17.suspended`, `qa17.admin`, password `QaPass17!x`), six stock
+  books re-pointed at predictable copy counts, three loans spanning overdue / due today / on
+  time, one unpaid fine, one ready hold and two wishlist rows; it records exactly what it wrote
+  in a `qa17_state` document and can remove precisely that. Earlier units' fixtures are untouched.
+- **The earlier QA accounts were unusable.** No `qa14`/`qa15`/`qa16` password was recoverable,
+  so the pass needed its own member with a *known* number of loans — a card reading "3 active
+  loans" is only evidence if the database was arranged to make it 3.
 
 ### Unit 16 — Notifications & Maintenance · `feat/16-notifications` 🚧 **WIP — one known defect**
 **Status: committed incomplete on the developer's instruction, so Unit 17 can proceed.** Not
@@ -863,19 +1076,27 @@ tracker before this unit started.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **17** Dashboards →
-   **18** Reports & Audit → **19** Settings →
-   **20** Landing & Polish → **21** Seed, QA, Docs & Deploy.
-   - **Unit 16 is committed but not finished.** Fix `POST /api/maintenance/run` first if the
-     job matters: nothing else in the app depends on it, so it can safely sit until after
-     Unit 17. `notify()` itself — the part every other feature uses — works.
-   - **Unit 17 can use what Unit 16 already built**: the staff layout fires
-     `runMaintenanceIfDue()`, so a dashboard's "last run" figure has a real source, and
-     `StatCard` takes an optional `format` for the money figures (added in Unit 13).
-   - **`getUnreadCount` is already implemented and exported** from `lib/services/notifications.ts`,
-     with the whole-inbox semantics a dashboard KPI needs. Do not build a second one.
-   - `GET /api/members/lookup` and `loansApi.list` already serve the Unit 12 UI; do not
-     build second versions. `getMemberUnpaidFineTotal` already serves the issue gate.
+1. **18** Reports & Audit  **19** Settings 
+   **20** Landing & Polish  **21** Seed, QA, Docs & Deploy.
+   - **Unit 17 is complete.** Both dashboards render, every KPI is verified against a direct
+     database count, and both routes are in the build output. `/staff/reports` and `/staff/audit`
+     are still `PlaceholderPage`s and are the first thing Unit 18 needs.
+   - **Unit 16 is committed but not finished.** Fix `POST /api/maintenance/run` if the job
+     matters: nothing else depends on it, and Unit 17 uses only the lazy trigger, which works.
+     `notify()` itself — the part every other feature uses — is fine.
+   - **Unit 18 can reuse Unit 17's chart scaffolding rather than building a second one:**
+     `ChartFrame`, `ChartReveal`, `ChartEmpty`, `ChartSkeleton`, `ChartTooltip` and
+     `chartAxisProps` all live in `components/features/dashboard/chart-frame.tsx`, and
+     `useChartTokens()` already resolves live token values for a report chart.
+   - **The reports UI will need aggregations that do not exist yet.** `getStaffDashboard` owns
+     its own pipelines; a borrowing/overdue/popular/members/fines/inventory report is six more,
+     and `REPORT_TYPES` already names them.
+   - **`AuditLog` has no read service.** `activityRows()` in `services/dashboard.ts` reads twelve
+     rows for the feed and is not exported. The audit register needs a paginated one with the
+     same "show the recorded summary, never re-derive it" rule.
+   - `getUnreadCount` is already exported from `lib/services/notifications.ts` — do not build a
+     second one. `GET /api/members/lookup` and `loansApi.list` already serve the Unit 12 UI.
+     `getMemberUnpaidFineTotal` already serves the issue gate.
 
 ### Unit 14 — spec checklist, ticked against the running app
 - [x] Cannot reserve while a copy is effectively available; can when all copies out or held.

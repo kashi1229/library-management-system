@@ -1,5 +1,5 @@
-import { PageSkeleton } from "@/components/common/page-skeleton";
+import { MemberDashboardSkeleton } from "@/components/features/dashboard/dashboard-skeletons";
 
 export default function Loading() {
-  return <PageSkeleton stats={4} />;
+  return <MemberDashboardSkeleton />;
 }

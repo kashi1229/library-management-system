@@ -7,6 +7,25 @@ import { getSettings } from "@/lib/services/settings";
 import { runMaintenanceIfDue } from "@/lib/services/maintenance";
 
 /**
+ * **Every staff route is dynamic, declared here rather than per page.**
+ *
+ * The `try { requireStaff() } catch { context = null }` below is what turns an unauthenticated
+ * visit into a redirect, and it has a side effect nobody asked for: `cookies()` signals Next
+ * that a route cannot be statically prerendered by **throwing**, and that throw is caught here.
+ * So Next never learns the section is per-request, and falls back to prerendering any staff
+ * route with no `params`.
+ *
+ * That was harmless while every staff page was a placeholder that queried nothing. It stopped
+ * being harmless at `next build` for Unit 17: `/staff` became the first staff page that reads
+ * Mongo while rendering, and the build tried to prerender it with no request, no cookie and
+ * therefore no `connectDB()` — `MongooseError: books.aggregate() buffering timed out`.
+ *
+ * `force-dynamic` states the truth for the whole section: it is gated on a session cookie and
+ * nothing in it is static.
+ */
+export const dynamic = "force-dynamic";
+
+/**
  * Staff area shell.
  *
  * This role check is **redundant with middleware on purpose**: middleware is a

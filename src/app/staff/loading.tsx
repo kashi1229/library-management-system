@@ -1,5 +1,5 @@
-import { PageSkeleton } from "@/components/common/page-skeleton";
+import { StaffDashboardSkeleton } from "@/components/features/dashboard/dashboard-skeletons";
 
 export default function Loading() {
-  return <PageSkeleton stats={6} />;
+  return <StaffDashboardSkeleton />;
 }

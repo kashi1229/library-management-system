@@ -503,6 +503,17 @@ export type DashboardTopBook = DashboardLowStockItem;
 export type DashboardCategoryShare = {
   id: string;
   name: string;
+  /**
+   * The category's stored `CategoryColor` **name** — not a class, not a hex value.
+   *
+   * Carried in the payload rather than looked up client-side, because `CATEGORY_COLOR_CLASS` is a
+   * module-level map of *class names* and a chart needs an actual colour value (see
+   * `use-chart-tokens.ts`). Sending the name means the component resolves both the class for the
+   * legend swatch and the live value for the slice through the one definition, instead of the
+   * service shipping a class it cannot validate and the client keeping a parallel id→hue table
+   * that nothing would keep in step.
+   */
+  color: CategoryColor;
   /** Summed `borrowCount` over the category, not a loan count. */
   count: number;
 };
