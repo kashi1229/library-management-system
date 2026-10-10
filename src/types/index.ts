@@ -441,6 +441,112 @@ export type FineTotals = {
  * Edit/Delete exactly on their own rows and staff see Remove exactly where they can use it.
  */
 /**
+ * Dashboards (spec 17).
+ *
+ * **Every figure here is computed in the database**, never in the browser. A KPI card is the
+ * most trusted number on the screen, and a dashboard that contradicted a member's own loan list
+ * would cost them their trust in every other number the app shows.
+ *
+ * `view` on a reading row is the **derived** loan state from `deriveLoanState` — the same
+ * function the loan lists use — so the countdown ring on the dashboard and the badge on a loan
+ * row can never disagree about the same book (invariant 12).
+ */
+export type MemberDashboard = {
+  kpis: {
+    activeLoans: number;
+    readyHolds: number;
+    /** Count of unpaid fines, which is what a member can act on. */
+    unpaidFines: number;
+    /** Their total, in currency units — **formatted by the UI**, never rendered raw. */
+    unpaidFineTotal: number;
+  };
+  /** Currently-out books, earliest due first. */
+  reading: Array<{
+    id: string;
+    book: LoanBookRef;
+    dueDate: string;
+    daysLeft: number;
+    view: LoanDisplayState;
+    renewCount: number;
+    /** Non-null only while somebody else is waiting for the same book. */
+    queuePosition: number | null;
+  }>;
+  /** Holds that are on the desk waiting to be collected. */
+  pickups: Array<{
+    id: string;
+    book: LoanBookRef;
+    expiresAt: string | null;
+    /** Rounded **up**, by the one shared `hoursUntil` — the same rule the reservations page uses. */
+    hoursLeft: number | null;
+  }>;
+  recommended: LoanBookRef[];
+  wishlist: LoanBookRef[];
+};
+
+export type DashboardDayPoint = {
+  /** `YYYY-MM-DD`, always UTC — the chart's x-axis key and never parsed as a local date. */
+  date: string;
+  /** Zero-filled: every day in the window appears, including the quiet ones. */
+  count: number;
+};
+
+export type DashboardLowStockItem = {
+  id: string;
+  title: string;
+  availableCopies: number;
+  totalCopies: number;
+  borrowCount: number;
+};
+
+export type DashboardTopBook = DashboardLowStockItem;
+
+export type DashboardCategoryShare = {
+  id: string;
+  name: string;
+  /** Summed `borrowCount` over the category, not a loan count. */
+  count: number;
+};
+
+export type StaffActivityItem = {
+  id: string;
+  /** The audit action, e.g. `loan.issue`. */
+  action: string;
+  /** The summary recorded **at the time of the action**, never re-derived. */
+  summary: string;
+  entityType: string;
+  createdAt: string;
+};
+
+export type StaffDashboard = {
+  kpis: {
+    totalTitles: number;
+    totalCopies: number;
+    /** Out on loan or held, so `totalCopies - availableCopies` explains itself. */
+    availableCopies: number;
+    members: number;
+    activeLoans: number;
+    overdue: number;
+    readyHolds: number;
+    unpaidFines: number;
+    unpaidFineTotal: number;
+  };
+  /** Exactly `seriesDays` points, zero-filled, oldest first. */
+  series: DashboardDayPoint[];
+  seriesDays: number;
+  byCategory: DashboardCategoryShare[];
+  topBooks: DashboardTopBook[];
+  lowStock: DashboardLowStockItem[];
+  dueToday: Array<{
+    id: string;
+    book: LoanBookRef;
+    member: LoanMemberRef;
+    dueDate: string;
+  }>;
+  activity: StaffActivityItem[];
+  generatedAt: string;
+};
+
+/**
  * One notification as the UI receives it (spec 16).
  *
  * **`tone` is resolved server-side**, because the bell popover, the popover row and the page

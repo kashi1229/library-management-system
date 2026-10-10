@@ -211,6 +211,10 @@ Notes added in Unit 14:
 - **No member id anywhere.** The inbox is resolved from the session (invariant 3), so the query
   schema has no field that could carry one and editing the URL cannot reach another member's
   notifications.
+- **`GET /dashboard/staff` fires the lazy maintenance sweep detached.** It is throttled on
+  `Settings.lastMaintenanceAt`, so for a librarian at the desk it is one indexed read. It is
+  never awaited into the response — a background job must not sit in front of the page while
+  somebody waits at the counter.
 - **`meta.unreadCount` counts the whole inbox, not the page.** The number on the bell is the
   number the member believes, and it cannot be derived from `items.length` once a page is full.
 - **`markRead` is scoped by `{ _id, user }`**, so a guessed id is a 404. "Does not exist" and
@@ -231,7 +235,7 @@ Notes added in Unit 14:
   `progress-tracker.md` §Unit 16.
 
 ## Dashboard, Reports, Audit, Settings, Maintenance
-| GET | /dashboard/member | M | KPIs, active loans, ready holds, recommendations |
+| GET | /dashboard/member | M | KPIs, active loans, ready holds, recommendations — **no member id** (session only) |
 | GET | /dashboard/staff | S | KPIs, 30-day loans series, by-category, top books, recent activity, low-stock |
 | GET | /public/stats | P | Books / members / loans counts + new arrivals for landing page (cached 60s) |
 | GET | /reports/:type | S | `type`: `borrowing|overdue|popular|members|fines|inventory`; filters `from,to,categoryId`; `format=csv` returns text/csv |
@@ -239,4 +243,4 @@ Notes added in Unit 14:
 | GET | /settings/public | P | Safe subset: libraryName, loanPeriodDays, maxActiveLoans, maxRenewals, finePerDay, currencySymbol, reservationHoldHours (created in Unit 12) |
 | GET | /settings | A | Full settings |
 | PATCH | /settings | A | Validates numeric ranges |
-| POST | /maintenance/run | A or `x-cron-secret` header | Returns counts of work done |
+| POST | /maintenance/run | A or `x-cron-secret` header | Returns counts of work done — **superseded by the row in §Notifications**, which documents the shape |

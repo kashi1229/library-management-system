@@ -4,16 +4,30 @@ Update this file after every meaningful implementation change.
 
 ## Current Phase
 - **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, reservations, wishlist/reviews.**
-  Units 01–15 complete. **Unit 16 in progress** (see the WIP section below). Units 17 → 21 to go.
+  Units 01–15 complete. **Unit 16 committed as WIP** (one known defect, see below).
+  **Unit 17 started, unverified.** Units 17 → 21 to go.
 
 ## Current Goal
+- **Unit 17 (Dashboards) is written and building, but NOT verified.** `tsc`, `eslint` and
+  `next build` are clean and both routes are in the build output; **no figure has been compared
+  to a live database**, because MongoDB was stopped for the whole of the session's verification
+  work and restarting it needs elevation. Do not treat any dashboard number as correct yet.
 - Build Units 17 → 21 in dependency order (see `context/specs/00-build-plan.md`).
-- **Unit 16 is committed as WIP with one known defect** — `POST /api/maintenance/run`
-  intermittently aborts its transaction. The fix is to finish; see the WIP section for exactly
-  what has been narrowed down and what has not.
-- **Unit 17 (Dashboards) can start on what is already here**: `StatCard` takes an optional
-  `format`, `GET /api/settings/public` exists, and `runMaintenanceIfDue()` already runs from the
-  staff layout.
+- **Unit 16 still has one open defect** — `POST /api/maintenance/run` intermittently aborts its
+  transaction. See the WIP section for the narrowed cause and the concrete next step.
+
+## Open — needs the developer's machine
+
+- **MongoDB is stopped, and `Start-Service MongoDB` needs an elevated prompt.** Running
+  `mongod.exe` directly does not work either: its configured `dbPath` and log path are under
+  `C:\Program Files\MongoDB\Server\8.0\`, which is not writable without elevation. The failing
+  requests show `MongoServerSelectionError: connect ECONNREFUSED 127.0.0.1:27017`.
+  - **Fix:** `net start MongoDB` from an elevated prompt, or Start it in Services.
+  - **This blocks Unit 17's entire verification**, whose first spec check is *"All KPI numbers
+    match direct database counts"* — impossible without a database.
+  - **Unit 16's results are still valid.** Its verification completed while MongoDB was up; only
+    work attempted after it went down is unverified. The database was already down when this
+    session began, not caused by any change here.
 
 ## Completed
 
@@ -1605,17 +1619,81 @@ hard-coded.
   rather than showing a button that does nothing.
 
 ## In Progress
-- **Unit 17 — Dashboards.** Not started. `StatCard` (with its optional `format`), the staff
-  layout's throttled maintenance hook, and the KPI data all exist; `GET /api/dashboard/member`
-  and `/api/dashboard/staff` are the missing pieces, plus both dashboard screens.
-- Unit 16 — Notifications. **Committed as WIP with one known defect** (the maintenance
-  transaction abort). Everything else in the unit works. See above for the narrowed-down cause
-  and the concrete next step.
+
+### Unit 17 — Dashboards · `feat/17-dashboards` 🚧 **unverified — no database**
+**Backend written and building. No number has been checked against live data.** See the
+"needs the developer's machine" note above.
+
+- **`lib/services/dashboard.ts`** — `getMemberDashboard`, `getStaffDashboard`,
+  `categoryColours`, plus `SERIES_DAYS = 30` and `LOW_STOCK_THRESHOLD = 1` as named constants.
+  - **Aggregations, not `find()` + counting in JavaScript.** A library with ten thousand loans
+    would otherwise pull every loan document over the wire to count in a loop.
+  - **Every count is scoped to real state.** "Active loans" is `status: "active"`; "overdue" is
+    an active loan whose due date has passed **in the calendar**, using `startOfDay` — invariant
+    12, and the same `deriveLoanState` the loan lists use, so a dashboard badge and a loan-row
+    badge cannot disagree about the same book.
+  - **Active and overdue come from one aggregation**, because they differ only by a date
+    comparison and two queries would scan the collection twice.
+  - **`$dateToString` with an explicit `timezone: "UTC"`**, matched against a UTC-anchored
+    window, so a loan lands in the same day-bucket regardless of the server's timezone. The
+    zero-fill builds the identical keys.
+  - **The series is zero-filled in JavaScript, not by a `$lookup` against a generated calendar.**
+    Thirty arithmetic keys need no query, and the machinery for a second aggregation would be
+    far more for the same thirty numbers. A `$group` returns only days that *had* loans, so an
+    unfilled chart draws a straight line across a quiet fortnight and makes the library look
+    steadily busy — the gaps are the information.
+  - **Everything independent is one `Promise.all`**, so the slowest query is the page's load
+    time rather than the sum of twenty.
+  - **Recommendations exclude currently-borrowed books in the `$nin`**, not by filtering
+    afterwards — a recommendation to borrow the book in your hand is not a recommendation.
+    Fallback is **popular, not "more of the same"**: a member with no history, or whose
+    categories are exhausted, gets what the library reads rather than an empty panel on the
+    first screen every new member sees.
+  - **The activity feed shows the audit `summary` recorded at the time**, never re-derived from
+    a document that may have been deleted. The audit log is append-only (invariant 10) — it is
+    history, not a join — so a deleted book's actions correctly stay visible.
+  - **`lowStock` is `availableCopies <= 1`, not `= 0`.** Zero copies is *out*, a different and
+    already-communicated state; one copy left is the first number to reach after a book becomes
+    popular, and it is the thing a librarian acts on.
+  - **`dueToday` is due today, not overdue** — what is coming back before it is late is the one
+    list on that screen that is actionable that morning.
+- **Routes** — `GET /api/dashboard/member` (`requireSession()`) and `GET /api/dashboard/staff`
+  (`requireStaff()`).
+  - **The member dashboard uses `requireSession()`, not `requireActiveMember()`.** A suspended
+    member must still reach their loan history and fine balance — that is what they need in
+    order to find out why they were suspended. Scoping is additionally enforced in the service,
+    so a future caller cannot skip it, and there is **no query parameter** at all (invariant 3).
+  - **The staff route fires the lazy maintenance sweep detached, with its own `.catch`.**
+    Awaiting it would put a background job in front of a librarian who has somebody waiting at
+    the counter, and an unhandled rejection would become a 500 on the dashboard. It also fires
+    from the staff layout (Unit 16); twice is free because the throttle makes the second a
+    no-op.
+- **`types/index.ts`** — `MemberDashboard`, `StaffDashboard`, `DashboardDayPoint`,
+  `DashboardLowStockItem`, `DashboardTopBook`, `DashboardCategoryShare`, `StaffActivityItem`.
+  `unpaidFineTotal` is documented as **needing UI formatting**, never rendered raw.
+- **`recharts@3.10.1` installed** (React 19 compatible). One dependency, listed in the spec.
+- **`StatCard`'s optional `format` is what the fine totals must use** — added in Unit 13
+  precisely so a card labelled "Unpaid total" cannot render `20` where the row beneath it
+  renders `$20.00`.
+- **Not yet done: the dashboard UI itself.** Both pages are still `PlaceholderPage`. Remaining
+  are `GreetingHeader`, the reading scroller, the pickup banner, `RecommendedRow`, the wishlist
+  preview, `KpiCard`, `LoansAreaChart`, `CategoryDonut`, `TopBooksBars`, `ActivityFeed`,
+  `LowStockList`, their skeletons, and the CSS-variable hook so chart colours follow the theme.
+- **Deliberately not decided yet:** the spec asks for chart colours "read through
+  `getComputedStyle`". Worth deciding against the alternative when writing it — the six
+  category accents are **theme-independent** (they do not flip in `.dark`), so only the grid,
+  axis and tooltip colours actually need re-reading, and a full `getComputedStyle` sweep would
+  be work for tokens that never change.
+
+### Unit 16 — Notifications. Committed as WIP with one known defect
+Everything else in the unit works. See the WIP section above for the narrowed cause and the
+concrete next step.
 
 ## Open Questions
-- **`POST /api/maintenance/run` aborts its transaction intermittently** — the one open defect in
-  the codebase. See the Unit 16 WIP section for the narrowed cause and the concrete next step.
-  Everything else in Unit 16 is working and browser-verified.
+- **`POST /api/maintenance/run` aborts its transaction intermittently** — the one open code
+  defect. Everything else in Unit 16 is working and browser-verified. See the Unit 16 section.
+- **MongoDB is stopped and needs an elevated prompt to start.** See "needs the developer's
+  machine" above. This is what currently blocks Unit 17's verification.
 - **The local dev database holds orphaned reservations** — roughly 30 rows whose `book`, and in
   several cases whose `member`, no longer exists. They are left by Units 08–13's QA deleting
   books and users **directly in Mongo**, which bypasses `deleteBook`'s refusal to remove a book with
@@ -1623,10 +1701,10 @@ hard-coded.
   they make `/staff/reservations` look like a screen full of failures. **Not cleaned**: it is an
   irreversible delete on the developer's data, so it is reported rather than done. One line clears
   them if wanted — `db.reservations.deleteMany({ book: { $nin: db.books.distinct("_id") } })` —
-  but the developer's call.
+  but the developer's call, and **not until MongoDB is running again**.
 - Final product name (default "Athenaeum"). Rename in Settings + `lib/constants` when Unit 19 lands.
 - Default currency (default USD, editable in Settings).
-- `MONGODB_URI` already points at a running **local** MongoDB, converted to a single-node replica
+- `MONGODB_URI` points at a **local** MongoDB, converted to a single-node replica
   set (`rs0`) so circulation transactions commit. **`mongod.cfg` lives outside the repo**, so
   another machine is standalone again and circulation will 500 there — the setup steps must go in
   the README before Unit 21. Every unit has now been verified against a real database, Units 11–15
@@ -1669,6 +1747,19 @@ hard-coded.
   Unit 16's queue-promotion test failed first because the fixture had the book fully out on loan,
   so there was correctly no free copy to promote into. Check that the fixture can actually
   produce the state before believing the failure.
+- **`.env.local` values reach Node with their quotes stripped, so a harness reading the file
+  directly must strip them too.** Unit 16 sent `CRON_SECRET="…"` verbatim and every
+  "correct secret accepted" assertion 403'd for a reason that had nothing to do with the code.
+  Next.js removes the quotes when it loads the file; a regex read does not.
+- **A spec instruction can be unimplementable, and following it literally is a real bug.** Unit 16
+  said "swallow duplicate-key errors from `dedupeKey`". Inside a transaction that is impossible
+  — Mongo aborts on any write error, so the catch leaves the caller in a dead transaction and
+  every later write fails. Reproduced it directly against the replica set before changing it.
+  When a spec and the database disagree, say so in the code and in the commit message.
+- **Stopping the database is not the same as the database being broken.** When Mongo went down
+  mid-session the log filled with `ECONNREFUSED` and it looked like a regression. It was
+  stopped before the session began. Check whether the service was ever running before believing
+  that a change broke something.
 - **Fixtures must be data the app would actually accept.** A made-up ISBN in a seed document does not
   fail loudly; it makes the *form* the thing under test, and the pass then reports a save failure instead
   of a fixture mistake. All fixture ISBNs are checksum-valid, and are verified as such.
