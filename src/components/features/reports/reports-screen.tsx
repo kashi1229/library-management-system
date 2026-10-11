@@ -61,55 +61,66 @@ export const REPORT_DEFS: ReadonlyArray<{
   { type: "inventory", label: "Inventory", icon: Boxes, blurb: "Copies on the shelf, out, and held.", hasCategory: true },
 ];
 
-/** The six reports as a sidebar on desktop and a horizontal scroller on mobile, per the spec. */
+/** The six reports as a tab bar on desktop and a clean horizontal pill scroller on mobile. */
 export function ReportNav({ active }: { active: ReportType }) {
   return (
-    <nav aria-label="Reports">
+    <nav aria-label="Reports Directory" className="print:hidden">
       {/*
-       * **A scroller on mobile, a grid from `sm`.** Six items wrap into a three-line block at
-       * 360px and push the table below the fold; one scrollable row keeps the current report
-       * visible and the other five one flick away.
+       * Scroller on mobile, clean responsive grid from sm up.
+       * Active item has parchment & ink accent styling with tactile indicator.
        */}
-      <ul className="-mx-4 flex snap-x snap-proximity gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-3">
+      <div className="-mx-4 flex snap-x snap-proximity gap-2.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-3 xl:grid-cols-6">
         {REPORT_DEFS.map(({ type, label, icon: Icon, blurb }) => {
           const current = type === active;
           return (
-            <li key={type} className="w-[15rem] shrink-0 snap-start sm:w-auto">
-              <Link
-                href={`${ROUTES.staff.reports}/${type}`}
-                aria-current={current ? "page" : undefined}
-                className={cn(
-                  "flex h-full items-start gap-3 rounded-lg border p-3 transition-colors",
-                  current
-                    ? "border-primary/40 bg-primary-soft"
-                    : "border-border bg-surface hover:border-primary/30 hover:bg-muted",
-                )}
-              >
+            <Link
+              key={type}
+              href={`${ROUTES.staff.reports}/${type}`}
+              aria-current={current ? "page" : undefined}
+              className={cn(
+                "group relative flex w-[14.5rem] shrink-0 snap-start flex-col justify-between rounded-xl border p-3.5 transition-all duration-200 sm:w-auto",
+                current
+                  ? "border-primary/50 bg-primary-soft/50 shadow-xs ring-1 ring-primary/20"
+                  : "border-border/80 bg-surface hover:border-primary/30 hover:bg-muted/40 hover:shadow-2xs",
+              )}
+            >
+              <div className="flex items-start gap-3">
                 <span
                   aria-hidden="true"
                   className={cn(
-                    "grid size-8 shrink-0 place-items-center rounded-md",
-                    current ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+                    "grid size-9 shrink-0 place-items-center rounded-lg transition-colors",
+                    current
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary",
                   )}
                 >
-                  <Icon className="size-4" strokeWidth={1.75} />
+                  <Icon className="size-4" strokeWidth={1.85} />
                 </span>
-                <span className="min-w-0">
+                <div className="min-w-0">
                   <span
                     className={cn(
-                      "block text-small font-medium",
-                      current ? "text-primary" : "text-foreground",
+                      "block text-small font-semibold tracking-tight",
+                      current ? "text-primary font-bold" : "text-foreground group-hover:text-primary",
                     )}
                   >
                     {label}
                   </span>
-                  <span className="mt-0.5 block text-caption text-muted-foreground">{blurb}</span>
-                </span>
-              </Link>
-            </li>
+                  <span className="mt-0.5 line-clamp-2 block text-caption text-muted-foreground leading-snug">
+                    {blurb}
+                  </span>
+                </div>
+              </div>
+
+              {current && (
+                <span
+                  className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-primary"
+                  aria-hidden="true"
+                />
+              )}
+            </Link>
           );
         })}
-      </ul>
+      </div>
     </nav>
   );
 }
@@ -162,75 +173,95 @@ export function ReportsScreen({ initialType }: { initialType: ReportType }) {
   }
 
   return (
-    <div className="container-page space-y-6">
-      <PageHeader
-        title={definition.label}
-        description={definition.blurb}
-        action={<ExportActions type={type} filters={filters.exportFilters} />}
-      />
+    <div className="container-page space-y-6 pb-12">
+      <div className="flex flex-col gap-4 border-b border-border/70 pb-5 sm:flex-row sm:items-center sm:justify-between">
+        <PageHeader
+          title={definition.label}
+          description={definition.blurb}
+          action={<ExportActions type={type} filters={filters.exportFilters} />}
+          className="w-full"
+        />
+      </div>
 
       <ReportNav active={type} />
 
-      <div className="grid gap-6 lg:grid-cols-[19rem_1fr] lg:items-start">
-        {/* **The filter rail is sticky on desktop and stacks above the table on mobile.** Sticky
-            because a filter you have to scroll back up to change is a filter nobody changes, and
-            a report with nine columns has the filters out of sight after two rows. */}
-        <Card className="space-y-5 p-5 lg:sticky lg:top-24 print:hidden">
-          <div className="space-y-2">
-            <h2 className="text-small font-medium text-foreground">Date range</h2>
-            <DateRangeFilter from={filters.from} to={filters.to} onChange={(next) => filters.set(next)} />
+      <div className="grid gap-6 lg:grid-cols-[18.5rem_1fr] lg:items-start">
+        {/*
+         * Filter rail: sticky on desktop with rounded card and clear sections
+         */}
+        <Card className="overflow-hidden rounded-xl border border-border/80 bg-surface p-5 shadow-xs lg:sticky lg:top-20 print:hidden">
+          <div className="flex items-center justify-between border-b border-border/60 pb-3">
+            <h2 className="text-small font-semibold tracking-tight text-foreground">
+              Filter report
+            </h2>
+            {filters.activeCount > 0 ? (
+              <span className="inline-flex items-center rounded-full bg-accent-soft px-2 py-0.5 text-caption font-semibold text-accent-ink">
+                {filters.activeCount} active
+              </span>
+            ) : null}
           </div>
 
-          {definition.hasCategory ? (
+          <div className="space-y-4 pt-4">
             <div className="space-y-2">
-              <label htmlFor="report-category" className="text-small font-medium text-foreground">
-                Category
+              <label className="block text-caption font-semibold text-foreground uppercase tracking-wider">
+                Date range
               </label>
-              <Select
-                value={filters.categoryId || "all"}
-                onValueChange={(value) =>
-                  filters.set({ categoryId: value === "all" ? undefined : value })
-                }
-              >
-                <SelectTrigger id="report-category">
-                  <SelectValue placeholder="All categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
-                  {categories?.map((category) => (
-                    <SelectItem key={category._id} value={category._id}>
-                      {category.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <DateRangeFilter from={filters.from} to={filters.to} onChange={(next) => filters.set(next)} />
             </div>
-          ) : null}
 
-          {filters.activeCount > 0 ? (
-            <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
-              <p className="text-caption text-muted-foreground" aria-live="polite">
-                {filters.activeCount} {filters.activeCount === 1 ? "filter" : "filters"} applied
-              </p>
-              <Button variant="ghost" size="sm" onClick={filters.reset}>
-                Reset
-              </Button>
-            </div>
-          ) : null}
+            {definition.hasCategory ? (
+              <div className="space-y-2 border-t border-border/60 pt-4">
+                <label htmlFor="report-category" className="block text-caption font-semibold text-foreground uppercase tracking-wider">
+                  Book category
+                </label>
+                <Select
+                  value={filters.categoryId || "all"}
+                  onValueChange={(value) =>
+                    filters.set({ categoryId: value === "all" ? undefined : value })
+                  }
+                >
+                  <SelectTrigger id="report-category" className="h-9 w-full bg-surface text-caption">
+                    <SelectValue placeholder="All categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All categories</SelectItem>
+                    {categories?.map((category) => (
+                      <SelectItem key={category._id} value={category._id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+
+            {filters.activeCount > 0 ? (
+              <div className="flex items-center justify-between gap-3 border-t border-border/70 pt-4">
+                <p className="text-caption text-muted-foreground" aria-live="polite">
+                  {filters.activeCount} {filters.activeCount === 1 ? "filter" : "filters"} applied
+                </p>
+                <Button variant="ghost" size="sm" onClick={filters.reset} className="h-8 text-caption text-muted-foreground hover:text-foreground">
+                  Reset filters
+                </Button>
+              </div>
+            ) : null}
+          </div>
         </Card>
 
-        <div className="space-y-5">
+        {/* Report main body */}
+        <div className="min-w-0 space-y-6">
           {isLoading && !data ? (
-            <div className="flex items-center justify-center py-24" aria-busy="true">
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface/50 py-24" aria-busy="true">
               <Spinner label="Building the report" />
+              <p className="mt-3 text-caption text-muted-foreground">Aggregating records and compiling metrics…</p>
             </div>
           ) : error ? (
-            <Card className="p-0">
+            <Card className="rounded-xl border border-danger/30 p-2 shadow-xs">
               <EmptyState
                 icon={AlarmClock}
                 title="This report could not be built"
                 description={toErrorMessage(error)}
-                action={<Button onClick={() => mutate()}>Try again</Button>}
+                action={<Button onClick={() => mutate()} className="h-9">Try again</Button>}
               />
             </Card>
           ) : data ? (
@@ -263,7 +294,7 @@ function ReportBody({
   onPage: (page: number) => void;
 }) {
   return (
-    <>
+    <div className="space-y-6">
       <SummaryStrip items={data.summary} />
 
       <ReportTable
@@ -273,7 +304,7 @@ function ReportBody({
         dir={dir}
         onSort={onSort}
         emptyState={
-          <Card className="p-0">
+          <Card className="rounded-xl border border-dashed border-border p-4 shadow-none">
             <EmptyState
               icon={History}
               title="Nothing in this period"
@@ -284,36 +315,46 @@ function ReportBody({
       />
 
       {/*
-       * **Always rendered, even on page 1 of 1.** A report says "of 412" whether or not there is a
-       * pager, so the reader knows how much they are not looking at — the "a capped list must say
-       * it is capped" rule from Unit 14. The *buttons* only appear when there is somewhere to go,
-       * because a disabled "Previous" on page 1 of 1 is a control that cannot work.
+       * Clean pagination footer with row counts and disabled state awareness
        */}
       <nav
         aria-label="Report pagination"
-        className="flex flex-col items-center gap-3 border-t border-border pt-5 sm:flex-row sm:justify-between print:hidden"
+        className="flex flex-col items-center gap-3 rounded-xl border border-border/70 bg-surface px-4 py-3.5 shadow-2xs sm:flex-row sm:justify-between print:hidden"
       >
-        <p className="text-small text-muted-foreground">
-          Page {data.page} of {data.totalPages} · {data.total.toLocaleString("en-US")}{" "}
-          {data.total === 1 ? "row" : "rows"}
+        <p className="text-small font-medium text-muted-foreground">
+          Page <span className="font-semibold text-foreground">{data.page}</span> of{" "}
+          <span className="font-semibold text-foreground">{data.totalPages}</span>{" "}
+          <span className="mx-1.5 text-border">•</span>{" "}
+          <span className="tabular-nums font-semibold text-foreground">{data.total.toLocaleString("en-US")}</span>{" "}
+          {data.total === 1 ? "row" : "rows"} total
         </p>
         {data.totalPages > 1 ? (
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={data.page <= 1} onClick={() => onPage(data.page - 1)}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={data.page <= 1}
+              onClick={() => onPage(data.page - 1)}
+              className="h-8 px-3 text-caption font-medium shadow-2xs"
+            >
               Previous
             </Button>
+            <div className="text-caption font-medium text-muted-foreground px-1">
+              {data.page} / {data.totalPages}
+            </div>
             <Button
               variant="outline"
               size="sm"
               disabled={data.page >= data.totalPages}
               onClick={() => onPage(data.page + 1)}
+              className="h-8 px-3 text-caption font-medium shadow-2xs"
             >
               Next
             </Button>
           </div>
         ) : null}
       </nav>
-    </>
+    </div>
   );
 }
 

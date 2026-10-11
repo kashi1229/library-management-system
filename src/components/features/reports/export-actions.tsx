@@ -35,20 +35,26 @@ export function ExportActions({
   const csvHref = reportsApi.csvUrl(type, filters);
 
   return (
-    <div className={cn("flex flex-wrap items-center gap-2", className)}>
-      <Button asChild variant="outline" size="sm">
+    <div className={cn("flex items-center gap-2 print:hidden", className)}>
+      <Button asChild variant="outline" size="sm" className="h-9 gap-1.5 shadow-2xs hover:bg-muted/60 transition-colors">
         <a href={csvHref} download>
-          <Download className="size-4" strokeWidth={1.75} aria-hidden="true" />
-          Export CSV
+          <Download className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />
+          <span>Export CSV</span>
         </a>
       </Button>
 
       {/* `onClick` on a button rather than `window.print()` in an effect: the browser's own
           print dialog must open from a user gesture, and calling it from an effect after mount
           is blocked. */}
-      <Button type="button" variant="outline" size="sm" onClick={() => window.print()}>
-        <Printer className="size-4" strokeWidth={1.75} aria-hidden="true" />
-        Print
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-9 gap-1.5 shadow-2xs hover:bg-muted/60 transition-colors"
+        onClick={() => window.print()}
+      >
+        <Printer className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />
+        <span>Print</span>
       </Button>
     </div>
   );

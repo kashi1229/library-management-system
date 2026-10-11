@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { REPORT_DEFS, ReportsScreen } from "@/components/features/reports/reports-screen";
+import { REPORT_META, REPORT_TYPES, type ReportType } from "@/lib/constants";
+import { ReportsScreen } from "@/components/features/reports/reports-screen";
 
 type Params = { params: Promise<{ type: string }> };
 
@@ -8,18 +9,18 @@ type Params = { params: Promise<{ type: string }> };
  * Per-report metadata, resolved from the report definition.
  *
  * **`generateMetadata` reads nothing from the database** — the title and description are already
- * declared beside the icon in `REPORT_DEFS`, which is the whole reason the six are declared in a
- * client module rather than inline on six pages.
+ * declared in `REPORT_META` in `@/lib/constants`.
  */
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { type } = await params;
-  const definition = REPORT_DEFS.find((def) => def.type === type);
+  if (!REPORT_TYPES.includes(type as ReportType)) {
+    return { title: "Report not found" };
+  }
 
-  if (!definition) return { title: "Report not found" };
-
+  const meta = REPORT_META[type as ReportType];
   return {
-    title: definition.label,
-    description: definition.blurb,
+    title: meta.label,
+    description: meta.blurb,
   };
 }
 
@@ -37,9 +38,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  */
 export default async function ReportPage({ params }: Params) {
   const { type } = await params;
-  const definition = REPORT_DEFS.find((def) => def.type === type);
+  if (!REPORT_TYPES.includes(type as ReportType)) {
+    notFound();
+  }
 
-  if (!definition) notFound();
-
-  return <ReportsScreen initialType={definition.type} />;
+  return <ReportsScreen initialType={type as ReportType} />;
 }

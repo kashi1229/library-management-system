@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import type { ReportColumn, ReportRow } from "@/types";
 
 /**
@@ -48,39 +49,40 @@ export function ReportTable({
   return (
     <>
       {/* ------------------------------ Desktop ------------------------------ */}
-      {/* `overflow-hidden` on the wrapper is deliberate (Unit 14's lesson): a table that outgrows
-          its box clips the last column with nothing to indicate it, so the columns carry a min
-          width and the wrapper is checked against its own `scrollWidth` in QA. */}
-      <div className="hidden overflow-hidden rounded-lg border border-border bg-surface md:block print:border-0 print:bg-transparent">
-        <Table containerClassName="overflow-visible">
+      {/* Responsive table container with smooth borders and subtle shadow */}
+      <div className="hidden overflow-hidden rounded-xl border border-border/80 bg-surface shadow-xs md:block print:border-0 print:bg-transparent print:shadow-none">
+        <Table containerClassName="overflow-x-auto">
           <TableHeader>
-            <TableRow>
+            <TableRow className="border-b border-border/70 bg-muted/40 hover:bg-muted/40">
               {columns.map((column) => {
                 const active = sort === column.key;
                 return (
                   <TableHead
                     key={column.key}
-                    className={cn(column.align === "right" && "text-right")}
+                    className={cn(
+                      "py-3.5 text-caption font-semibold tracking-wider text-muted-foreground uppercase",
+                      column.align === "right" && "text-right",
+                    )}
                     aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
                   >
                     <button
                       type="button"
                       onClick={() => onSort(column.key)}
                       className={cn(
-                        "-mx-1 inline-flex h-8 items-center gap-1 rounded px-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        active ? "text-foreground" : "text-muted-foreground",
+                        "group -mx-1 inline-flex h-8 items-center gap-1.5 rounded-md px-2 transition-colors hover:bg-surface/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        active ? "font-bold text-foreground" : "text-muted-foreground",
                         column.align === "right" && "flex-row-reverse",
                       )}
                     >
                       <span className="truncate">{column.label}</span>
                       {active ? (
                         dir === "asc" ? (
-                          <ArrowUp className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                          <ArrowUp className="size-3.5 shrink-0 text-primary" strokeWidth={2} aria-hidden="true" />
                         ) : (
-                          <ArrowDown className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                          <ArrowDown className="size-3.5 shrink-0 text-primary" strokeWidth={2} aria-hidden="true" />
                         )
                       ) : (
-                        <ArrowUpDown className="size-3.5 shrink-0 opacity-50" strokeWidth={1.75} aria-hidden="true" />
+                        <ArrowUpDown className="size-3.5 shrink-0 opacity-40 transition-opacity group-hover:opacity-75" strokeWidth={1.75} aria-hidden="true" />
                       )}
                     </button>
                   </TableHead>
@@ -90,16 +92,20 @@ export function ReportTable({
           </TableHeader>
           <TableBody>
             {rows.map((row, index) => (
-              <TableRow key={String(row.id ?? index)}>
+              <TableRow
+                key={String(row.id ?? index)}
+                className="transition-colors duration-150 hover:bg-muted/40"
+              >
                 {columns.map((column) => (
                   <TableCell
                     key={column.key}
                     className={cn(
+                      "py-3.5 align-middle text-small",
                       column.align === "right" && "text-right tabular-nums",
                       column.emphasis && "font-medium text-foreground",
                     )}
                   >
-                    {cell(row[column.key])}
+                    {renderCell(column.key, row[column.key])}
                   </TableCell>
                 ))}
               </TableRow>
@@ -109,42 +115,93 @@ export function ReportTable({
       </div>
 
       {/* ------------------------------- Mobile ------------------------------- */}
-      {/* **Every column is shown**, as label/value pairs, because a report row dropped to fit is a
-          number missing from a table somebody is about to quote. */}
-      <ul className="space-y-3 md:hidden">
-        {rows.map((row, index) => (
-          <li key={String(row.id ?? index)} className="rounded-lg border border-border bg-surface p-4">
-            <dl className="space-y-1.5">
-              {columns.map((column) => (
-                <div key={column.key} className="flex items-baseline justify-between gap-4">
-                  <dt className="shrink-0 text-caption text-muted-foreground">{column.label}</dt>
-                  <dd
-                    className={cn(
-                      "min-w-0 text-end text-small tabular-nums",
-                      column.emphasis && "font-medium text-foreground",
-                    )}
-                  >
-                    {cell(row[column.key])}
-                  </dd>
+      {/* Polished mobile card view with clear visual grouping */}
+      <ul className="space-y-3.5 md:hidden">
+        {rows.map((row, index) => {
+          const firstCol = columns[0];
+          const restCols = columns.slice(1);
+          return (
+            <li
+              key={String(row.id ?? index)}
+              className="overflow-hidden rounded-xl border border-border/80 bg-surface p-4 shadow-xs transition-shadow duration-150 hover:shadow-soft"
+            >
+              {firstCol && (
+                <div className="mb-3 border-b border-border/60 pb-2.5">
+                  <span className="block text-caption font-medium text-muted-foreground">
+                    {firstCol.label}
+                  </span>
+                  <div className="mt-0.5 text-body font-semibold text-foreground">
+                    {renderCell(firstCol.key, row[firstCol.key])}
+                  </div>
                 </div>
-              ))}
-            </dl>
-          </li>
-        ))}
+              )}
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+                {restCols.map((column) => (
+                  <div key={column.key} className="space-y-0.5">
+                    <dt className="text-caption font-medium text-muted-foreground truncate">
+                      {column.label}
+                    </dt>
+                    <dd
+                      className={cn(
+                        "text-small tabular-nums text-foreground",
+                        column.emphasis && "font-semibold text-foreground",
+                      )}
+                    >
+                      {renderCell(column.key, row[column.key])}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </li>
+          );
+        })}
       </ul>
     </>
   );
 }
 
 /**
- * One cell, for every report.
- *
- * **A missing key renders an em dash, never `undefined`.** `columns` is the schema and a row is
- * built independently of it, so a report that drops a field would otherwise print the literal
- * string "undefined" into a table somebody might export. The em dash is this codebase's existing
- * "no value" convention (`formatDate` returns it for the same reason).
+ * Intelligent cell rendering.
+ * Formats known state/status values as badges for high readability, while
+ * preserving exact strings and formatting.
  */
-function cell(value: ReportRow[string]): React.ReactNode {
-  if (value === null || value === undefined || value === "") return <span className="text-muted-foreground">—</span>;
-  return String(value);
+function renderCell(key: string, value: ReportRow[string]): React.ReactNode {
+  if (value === null || value === undefined || value === "") {
+    return <span className="text-muted-foreground/60">—</span>;
+  }
+
+  const str = String(value);
+
+  // Status/state column values styled with badges for visual clarity
+  if (key === "state" || key === "status") {
+    const lower = str.toLowerCase();
+    if (lower === "returned" || lower === "paid" || lower === "active") {
+      return (
+        <Badge variant="success" className="capitalize text-caption">
+          {str}
+        </Badge>
+      );
+    }
+    if (lower === "overdue" || lower === "unpaid" || lower === "suspended") {
+      return (
+        <Badge variant="danger" className="capitalize text-caption">
+          {str}
+        </Badge>
+      );
+    }
+    if (lower === "waived" || lower === "waiting") {
+      return (
+        <Badge variant="warning" className="capitalize text-caption">
+          {str}
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="secondary" className="capitalize text-caption">
+        {str}
+      </Badge>
+    );
+  }
+
+  return str;
 }

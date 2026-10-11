@@ -26,32 +26,53 @@ const TONE_LABEL = {
   danger: "text-danger-ink",
 } as const;
 
+const TONE_BG = {
+  default: "border-border bg-surface",
+  success: "border-success/30 bg-success-soft/20",
+  warning: "border-warning/30 bg-warning-soft/20",
+  danger: "border-danger/30 bg-danger-soft/20",
+} as const;
+
+const TONE_DOT = {
+  default: "bg-muted-foreground/40",
+  success: "bg-success-ink",
+  warning: "bg-warning-ink",
+  danger: "bg-danger-ink",
+} as const;
+
 export function SummaryStrip({ items }: { items: ReportSummaryItem[] }) {
   if (items.length === 0) return null;
 
   return (
-    <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-      {items.map((item) => (
-        <div
-          key={item.label}
-          className="rounded-lg border border-border bg-surface px-4 py-3 print:border-border print:bg-transparent"
-        >
-          <dt className={cn("text-caption font-medium", TONE_LABEL[item.tone ?? "default"])}>
-            {item.label}
-          </dt>
-          {/* `tabular-nums` and a `break-words` wrapper: the busiest title in the popular report
-              can be a full sentence, and a value that overflows its card turns the strip into
-              the one element on the page that scrolls sideways. */}
-          <dd
+    <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      {items.map((item) => {
+        const tone = item.tone ?? "default";
+        return (
+          <div
+            key={item.label}
             className={cn(
-              "mt-1 break-words font-display text-h3 font-semibold tracking-[-0.02em] tabular-nums",
-              TONE_VALUE[item.tone ?? "default"],
+              "group relative overflow-hidden rounded-xl border p-4 shadow-xs transition-all duration-200 hover:shadow-soft",
+              "print:border-border print:bg-transparent print:shadow-none",
+              TONE_BG[tone],
             )}
           >
-            {item.value}
-          </dd>
-        </div>
-      ))}
+            <dt className="flex items-center gap-1.5 text-caption font-medium">
+              <span className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[tone])} aria-hidden="true" />
+              <span className={cn("truncate", TONE_LABEL[tone])}>
+                {item.label}
+              </span>
+            </dt>
+            <dd
+              className={cn(
+                "mt-2 break-words font-display text-h3 font-semibold tracking-tight tabular-nums",
+                TONE_VALUE[tone],
+              )}
+            >
+              {item.value}
+            </dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }

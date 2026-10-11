@@ -176,6 +176,15 @@ export const REPORT_TYPES = [
 ] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
+export const REPORT_META: Record<ReportType, { label: string; blurb: string; hasCategory: boolean }> = {
+  borrowing: { label: "Borrowing history", blurb: "Every loan issued in the period.", hasCategory: true },
+  overdue: { label: "Overdue loans", blurb: "Active loans past their due date.", hasCategory: true },
+  popular: { label: "Popular books", blurb: "Titles ranked by how often they went out.", hasCategory: true },
+  members: { label: "Member activity", blurb: "Members ranked by borrowing.", hasCategory: true },
+  fines: { label: "Fines", blurb: "Fines raised and how each was settled.", hasCategory: true },
+  inventory: { label: "Inventory", blurb: "Copies on the shelf, out, and held.", hasCategory: true },
+};
+
 /* -------------------------------------------------------------------------- */
 /* Category accents                                                            */
 /* -------------------------------------------------------------------------- */

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { REPORT_DEFS } from "@/components/features/reports/reports-screen";
+import { REPORT_TYPES } from "@/lib/constants";
 import { ReportsScreen } from "@/components/features/reports/reports-screen";
 
 export const metadata: Metadata = {
@@ -20,6 +20,6 @@ export const metadata: Metadata = {
  * itself.
  */
 export default function ReportsIndexPage() {
-  const first = REPORT_DEFS[0].type;
+  const first = REPORT_TYPES[0];
   return <ReportsScreen initialType={first} />;
 }

@@ -118,58 +118,77 @@ export function DateRangeFilter({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <CalendarDays className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />
+    <div className="space-y-3.5">
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-caption font-medium text-muted-foreground">
+          <CalendarDays className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+          <span>Preset ranges</span>
+        </div>
         <div
           role="group"
-          aria-label="Date range"
-          className="flex flex-wrap gap-1.5 rounded-md bg-muted p-1"
+          aria-label="Date range presets"
+          className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted/50 p-1 sm:grid-cols-5"
         >
-          {PRESETS.map((option) => (
-            <Button
-              key={option.value}
-              type="button"
-              size="sm"
-              variant={preset === option.value || (custom && option.value === "custom") ? "default" : "ghost"}
-              aria-pressed={preset === option.value || (custom && option.value === "custom")}
-              onClick={() => applyPreset(option.value as RangePresetValue)}
-              className={cn(
-                option.value === "custom" && "hidden sm:inline-flex",
-                "h-9 px-3",
-              )}
-            >
-              {option.label}
-            </Button>
-          ))}
+          {PRESETS.map((option) => {
+            const isSelected = preset === option.value || (custom && option.value === "custom");
+            return (
+              <Button
+                key={option.value}
+                type="button"
+                size="sm"
+                variant={isSelected ? "default" : "ghost"}
+                aria-pressed={isSelected}
+                onClick={() => applyPreset(option.value as RangePresetValue)}
+                className={cn(
+                  "h-8 px-2 text-caption font-medium transition-all duration-150",
+                  isSelected
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:bg-surface hover:text-foreground",
+                  option.value === "custom" && "col-span-2 sm:col-span-1",
+                )}
+              >
+                {option.label}
+              </Button>
+            );
+          })}
         </div>
       </div>
 
-      {/* `sm:grid-cols-2` so the two inputs sit side by side from tablet up and stack below —
-          at 360px two date inputs on one row cannot both show their full value. */}
-      <div className={cn("grid gap-3", custom ? "sm:grid-cols-[1fr_1fr_auto] sm:items-end" : "hidden")}>
-        <Field label="From" error={error && localFrom ? error : undefined}>
-          <Input
-            id="range-from"
-            type="date"
-            value={localFrom}
-            max={localTo || undefined}
-            onChange={(event) => setLocalFrom(event.target.value)}
-          />
-        </Field>
-        <Field label="To" error={error && !localFrom ? error : undefined}>
-          <Input
-            id="range-to"
-            type="date"
-            value={localTo}
-            min={localFrom || undefined}
-            onChange={(event) => setLocalTo(event.target.value)}
-          />
-        </Field>
-        <Button type="button" onClick={applyCustom} className="h-11">
-          Apply
-        </Button>
-      </div>
+      {/* Custom date range picker fields */}
+      {custom && (
+        <div className="rounded-xl border border-border/80 bg-surface-muted/40 p-3 shadow-xs space-y-3 animate-in fade-in-50 duration-200">
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <Field label="From date" error={error && localFrom ? error : undefined}>
+              <Input
+                id="range-from"
+                type="date"
+                value={localFrom}
+                max={localTo || undefined}
+                className="h-9 text-caption bg-surface"
+                onChange={(event) => setLocalFrom(event.target.value)}
+              />
+            </Field>
+            <Field label="To date" error={error && !localFrom ? error : undefined}>
+              <Input
+                id="range-to"
+                type="date"
+                value={localTo}
+                min={localFrom || undefined}
+                className="h-9 text-caption bg-surface"
+                onChange={(event) => setLocalTo(event.target.value)}
+              />
+            </Field>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={applyCustom}
+            className="w-full h-9 font-medium shadow-xs"
+          >
+            Apply range
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
