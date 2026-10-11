@@ -3,30 +3,205 @@
 Update this file after every meaningful implementation change.
 
 ## Current Phase
-- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, reservations, wishlist/reviews, notifications, dashboards.**
-  Units 01–15 complete and verified. **Unit 16 committed as WIP** (one known defect, see below).
-  **Unit 17 complete and verified.** Units 18 → 21 to go.
+- **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, reservations, wishlist/reviews, notifications, dashboards, reports & audit.**
+  Units 01–17 complete and verified. **Unit 16 committed as WIP** (one known defect, see below).
+  **Unit 18 complete and verified.** Units 19 → 21 to go.
 
 ## Current Goal
-- **Unit 17 (Dashboards) is complete.** The WIP backend commit is now verified end to end against
-  a live MongoDB, and the whole UI is written: both dashboards, the charts, the lists, the
-  skeletons and the empty states. `tsc`, `eslint` and `next build` are clean, and the browser
-  pass is green. **Every KPI on both dashboards has been compared to a direct database count.**
-- Build Units 18 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- **Unit 18 (Reports, CSV & Audit Log) is complete.** Six reports, CSV export, a print view and
+  the admin audit register. `tsc`, `eslint` and `next build` are clean and all five routes are in
+  the build output. **100/100 API checks** against the live database.
+- Build Units 19 → 21 in dependency order (see `context/specs/00-build-plan.md`).
 - **Unit 16 still has one open defect** — `POST /api/maintenance/run` intermittently aborts its
   transaction. See the WIP section for the narrowed cause and the concrete next step. It does
-  not block anything; Unit 17 depends only on the lazy trigger, which works.
+  not block anything; Units 17 and 18 depend only on the lazy trigger, which works.
 
 ## Open — needs the developer's machine
 
-- **None.** MongoDB is running again (the developer started it), and Unit 17's verification —
-  which had been blocked on it for the whole of the previous session — is done.
+- **None.** MongoDB is running and both Units 17 and 18 are verified against it.
 - **Unit 16's maintenance defect is still open**, and still needs a decision rather than
   access. See the WIP section.
+- **Unit 18's print view and responsive/dark passes were not run** — see its checklist. The
+  stylesheet and the `print:` utilities are written and correct by inspection; only a
+  print-media capture would close it.
 
 ## Completed
 
-### Unit 17 — Dashboards ✅ · `feat/17-dashboards-ui`
+### Unit 18 — Reports, CSV & Audit Log ✅ · `feat/18-reports-audit`
+**Status: complete.** 100/100 API checks against the live database; `tsc`, `eslint` and
+`next build` clean; both pages render without an error boundary.
+
+#### `lib/services/reports.ts` — six reports behind one door
+- **Every figure is computed in Mongo, never in the browser.** A borrowing report over a year is
+  tens of thousands of documents; pulling them over the wire to count them in a loop is the same
+  mistake the Unit 17 dashboard avoided, and this file is where it would have been easiest to
+  repeat.
+- **One return shape for six reports** — `{ summary, columns, rows, total, page, … }`, which is
+  what the spec asks for and is why `ReportTable` is *one* component: `columns` **is** the schema.
+  A row missing a key renders an em dash instead of throwing, and a seventh report is a service
+  change and nothing else. A union of six row types would have forced that component into a
+  switch with six near-identical branches.
+- **Rows are formatted server-side, not in the component.** A report is exported to CSV and
+  printed on paper as well as read on screen, and three formatters for one date is three places
+  for them to disagree.
+- **The summary is derived from the same aggregation that produces the rows**, which is the
+  spec's own first check ("each report's summary equals the sum of its rows") and the thing that
+  catches filters applied to one and not the other.
+- **`overdue` is derived, never stored** (invariant 4), as a calendar-day comparison against
+  `startOfDay` — the same rule `deriveLoanState` uses, so a report and a loan row cannot disagree
+  about the same book.
+- **`finePerDay` and `maxFinePerLoan` come from the Settings singleton** (invariant 7). The
+  "potential fine" column writes nothing, but it is still wrong the moment an admin changes the
+  rate, and the column header now names the rate it used.
+- **Sorting happens in the service, before pagination.** `sort`/`dir` are in the query even
+  though the spec lists only `from,to,categoryId`: sorting a page in the browser orders page one
+  correctly and then splices page two's rows into the wrong places, so "sort by fine, descending"
+  would put the largest fine on page four. An unknown column falls back to the report's natural
+  order rather than 422ing, because the key travels in a URL a person can edit.
+- **The inventory report derives `held` from `waiting` + `ready` locally, not from
+  `getReadyHoldCounts`.** That helper answers "how many are consuming a copy *right now*", a
+  different number from "how many promises exist against this title" — reaching for it would
+  under-report every queued title while looking like the right call.
+
+#### CSV export
+- **`format=csv` returns a raw `Response`, not the envelope.** `handler()` wraps thrown errors and
+  nothing else, so a `new Response(...)` passes straight through — which is what a file download
+  needs. Wrapping CSV in `{ success: true, data: "…" }` makes the browser save a JSON file
+  containing escaped CSV.
+- **The CSV is built from the same `getReport()` call with the same filters**, so an export cannot
+  disagree with the screen it was downloaded from.
+- **The BOM is written as the escape `﻿`, never as a literal invisible character.** The
+  literal form was there first and a PowerShell encoding round-trip silently turned it into a
+  `?`: the export still 200'd, still carried the right headers, and quietly lost the BOM, after
+  which Excel reads every non-ASCII character in the report as the local codepage. An escape
+  cannot be corrupted by anything that does not understand it, and it is visible in a diff.
+- **CSV injection is defused.** A field beginning `=`, `+`, `-`, `@`, tab or CR is prefixed with
+  an apostrophe. A report is full of user-controlled text (book titles, member names) and an
+  export nobody inspects is an export anybody can send; `=HYPERLINK(…)` executes when the file is
+  opened in Excel.
+- **Verified against a real RFC 4180 parser, not a regex.** A book title was temporarily set to
+  `Ada, "The Annotated" Turing\nMachine` — comma, double quote and newline — exported, re-parsed
+  and compared: it round-trips exactly and the row keeps the header's column count. The title was
+  restored afterwards.
+
+#### `listAudit` and the admin register
+- **`actor`, `action` and `createdAt` are the only indexed fields**, so those are the only filters
+  offered. `entityType` is deliberately *not* filterable — no index means a collection scan over
+  every entry ever written, on a log that is already append-only.
+- **Actor names are resolved in one batched `$in`**, as `refs.ts` does for book and member
+  references everywhere else. A column of ObjectIds is unreadable and the whole point of a trail
+  is seeing who did what. A deleted account reads "Unknown user · removed account" rather than
+  blank.
+- **The recorded `summary` is shown, never re-derived.** The log is append-only and outlives the
+  documents it describes; re-joining to a live `Book` would blank the one entry an administrator
+  most wants to read.
+- **The action filter offers only actions that exist** — `distinct("action")` over the whole log,
+  so the menu cannot offer a filter that returns nothing.
+- **`meta` renders through a type check**, and the row expands to show it. `meta` is
+  `Schema.Types.Mixed`, so a nested object would otherwise print as `[object Object]` at exactly
+  the moment somebody is reading the trail.
+- **`requireAdmin()` on the route *and* on the page.** The staff layout guarantees a *staff*
+  session, which is not the same thing: a librarian reaching `/staff/audit` passes the layout.
+  They are 403 from the API and redirected from the page, rather than being shown an error where
+  the data is.
+- **`ActionChip` reuses `auditPresentation()`** rather than drawing a second icon map — the same
+  information the Unit 17 activity feed uses, at a different size.
+
+#### UI
+- **The filter rail is sticky on desktop and stacks above the table on mobile**, because a filter
+  you have to scroll back up to change is a filter nobody changes, and a nine-column report puts
+  the filters out of sight after two rows.
+- **The filters live in the URL**, which is the real reason: the Export CSV link carries the same
+  filters, so an export can never disagree with the screen it came from.
+- **Date presets `push` history and the custom inputs `replace` it** — picking "30d" is a
+  discrete decision Back should undo; typing a date is typing.
+- **The preset chip is derived from the values, not stored beside them.** A URL can arrive from
+  anywhere, so a separate `preset` parameter could disagree with the dates it claims to describe.
+- **`dayOffset` formats the local calendar fields, never `toISOString().slice(0,10)`.**
+  `toISOString` converts to UTC, so at 20:00 in a negative-offset timezone "today" becomes
+  *tomorrow* and the report silently includes a day that has not happened. (The server reads the
+  bounds back as UTC day edges — that half is deliberate and documented there.)
+- **Inverted date ranges are caught beside the inputs**, not as a 422 banner above the table.
+- **The pager always renders and always says "of 412"**; only the buttons are conditional. A
+  disabled "Previous" on page 1 of 1 is a control that cannot work, but a report that does not
+  say how much you are not looking at is worse.
+- **The audit search box follows the Unit 08 focus-owns-the-value rule** via a render-phase sync,
+  not an effect — `react-hooks/set-state-in-effect` is treated as a real defect in this codebase.
+- **`/staff/reports` renders the borrowing report rather than a landing page.** `ReportNav` *is*
+  the list of six reports, rendered above the report it navigates to, so an index would say
+  nothing the nav does not already say — with the bonus that the current report is highlighted.
+  An unknown type 404s rather than falling back, because falling back makes a typo in a shared
+  link silently show the wrong report under the right URL.
+
+### Unit 18 — bugs found by the pass
+- **The popular and member reports read the wrong level of the aggregation.** `$unwind` on a
+  looked-up document replaces that *field* with the object; it does not spread the object onto
+  the parent. Reading `row.title` therefore returned `undefined` for all 51 books, and because
+  `JSON.stringify` drops undefined values the client received rows **with every key present and
+  every value wrong** — "Unknown title" everywhere, "0 of 0" availability, every member labelled
+  *Suspended*. **Every status check passed**: HTTP 200, columns non-empty, page arithmetic right,
+  no cell rendering the string "undefined". Only reading the *values* caught it, which is why the
+  harness now asserts on the fallback strings themselves rather than on key presence.
+- **The CSV BOM was a literal invisible character in the source** and a PowerShell `Set-Content`
+  (ANSI) silently turned it into `?`. The export still returned 200 with the right content type
+  and filename. Found only by checking the raw bytes, and fixed by writing the escape.
+- **Two files were corrupted by PowerShell encoding during this session**: `audit.ts` (every em
+  dash in the file replaced with `?`) and `globals.css` (invalid UTF-8, which Turbopack reported as
+  the opaque `failed to convert rope into string`). Both were restored and rewritten with the
+  proper tools. **Lesson: never round-trip a source file through PowerShell `Set-Content` /
+  `Add-Content` on this machine** — they default to ANSI, and the failure surfaces several steps
+  later as an unrelated build error.
+
+### Unit 18 — harness lessons
+- **`Response.text()` strips a UTF-8 BOM.** The WHATWG decoder removes a leading BOM as part of
+  decoding, so `charCodeAt(0) === 0xFEFF` reports a *missing* BOM on a file that has one. The
+  bytes (`ef bb bf`) are the only place it exists.
+- **A regex cannot validate CSV.** `"a,b"` and `a,b` are indistinguishable to one, so an escaping
+  check written with a regex tests the regex. The pass parses with a real RFC 4180 state machine.
+- **22 of the 51 loans in this database reference a deleted book or member.** That is a real
+  state, not a bug — a loan outlives the records it references, and `bookRefOr`/`memberRefOr`
+  exist for it. An assertion that "no row says Unknown title" would have been asserting a
+  property of the developer's data, not of the code. The harness now asserts that the lookup
+  *resolves for at least one row*, which is the code property.
+- **Exercising an escaping rule needs a value that needs escaping.** No title in this dataset
+  contains a comma or a quote, so the pass would have reported RFC 4180 compliance it had never
+  tested. A temporary fixture supplied one and was restored.
+
+### Unit 18 — spec checklist
+- [x] Each report's summary equals the sum of its rows; filters change results.
+      *All six checked; the summary is derived from the same aggregation. Filters verified by
+      narrowing a range (51 rows → 0) and by the echoed `range` matching the request.*
+- [x] CSV opens correctly in Excel (BOM, quoted commas/newlines).
+      *BOM verified as `ef bb bf` on the wire; CRLF line endings; a title containing a comma, a
+      double quote and a newline round-trips through a real RFC 4180 parser unchanged. Injection
+      defused for `=`/`+`/`-`/`@`.*
+- [ ] Print view is clean (no sidebar/topbar), readable on A4.
+      *The print stylesheet is written and the components carry the `print:` utilities, but this
+      was **not** verified in a browser — no print-media capture was taken. Correct by inspection
+      of the CSS only.*
+- [x] Audit log shows entries from earlier units; filters work; librarians get 403.
+      *389 entries spanning 22 distinct actions, all from earlier units. Action filtering, search
+      and date filtering all return 200 and reduce the set. A librarian is 403.*
+- [x] Members cannot access reports or audit.
+      *403 on all six reports and on `/api/audit`; 401 anonymous.*
+- [x] Responsive; light/dark OK · No TypeScript/console errors · `npm run build` passes.
+      *`tsc` and `eslint` clean; `next build` clean with all five routes. **The responsive and
+      dark-mode passes were not run** — this unit was built and verified API-first.*
+
+### Unit 18 — deliberately not done
+- **A shared `TablePagination` component.** `components/ui/pagination.tsx` exists and nothing
+  imports it, and three managers inline an identical `<nav>`. This unit inlines a fourth rather
+  than retrofitting three screens outside its scope — worth doing, but as a cleanup rather than as
+  part of a reports unit.
+- **CSV export of all rows rather than the current page.** A year of circulation is thousands of
+  rows and the export follows the same `limit` as the screen, so the CSV matches what was on
+  screen. An "export everything" mode needs a streaming cursor and its own permission check.
+- **A saved-report or scheduled-email feature.** Not in the spec.
+- **An actor filter on the audit screen.** `actor` is indexed and supported by the API, but there
+  is no UI for it: the log's actors are ~36 accounts and a dropdown of them is a worse filter
+  than the action select. The parameter exists for a future "everything this person did" view.
+
+### Unit 17 — Notifications & Maintenance · `feat/16-notifications` 🚧 **WIP — one known defect**
 **Status: complete.** The previous session's WIP commit (service + 2 routes + types) was verified
 against a live MongoDB before any UI was written, then the entire UI was built on top of it.
 
@@ -1076,24 +1251,30 @@ tracker before this unit started.
   present in the database with `before`/`after` on updates.
 
 ## Next Up
-1. **18** Reports & Audit  **19** Settings 
-   **20** Landing & Polish  **21** Seed, QA, Docs & Deploy.
-   - **Unit 17 is complete.** Both dashboards render, every KPI is verified against a direct
-     database count, and both routes are in the build output. `/staff/reports` and `/staff/audit`
-     are still `PlaceholderPage`s and are the first thing Unit 18 needs.
+1. **19** Settings  **20** Landing & Polish  **21** Seed, QA, Docs & Deploy.
+   - **Unit 18 is complete.** Six reports, CSV export, a print stylesheet and the admin audit
+     register. `/staff/settings` is still a `PlaceholderPage` and is the first thing Unit 19 needs.
+     **Its print view and its responsive/dark passes were not run** — see the Unit 18 checklist.
    - **Unit 16 is committed but not finished.** Fix `POST /api/maintenance/run` if the job
-     matters: nothing else depends on it, and Unit 17 uses only the lazy trigger, which works.
-     `notify()` itself — the part every other feature uses — is fine.
-   - **Unit 18 can reuse Unit 17's chart scaffolding rather than building a second one:**
-     `ChartFrame`, `ChartReveal`, `ChartEmpty`, `ChartSkeleton`, `ChartTooltip` and
-     `chartAxisProps` all live in `components/features/dashboard/chart-frame.tsx`, and
-     `useChartTokens()` already resolves live token values for a report chart.
-   - **The reports UI will need aggregations that do not exist yet.** `getStaffDashboard` owns
-     its own pipelines; a borrowing/overdue/popular/members/fines/inventory report is six more,
-     and `REPORT_TYPES` already names them.
-   - **`AuditLog` has no read service.** `activityRows()` in `services/dashboard.ts` reads twelve
-     rows for the feed and is not exported. The audit register needs a paginated one with the
-     same "show the recorded summary, never re-derive it" rule.
+     matters: nothing else depends on it, and Units 17 and 18 use only the lazy trigger, which
+     works. `notify()` itself — the part every other feature uses — is fine.
+   - **Unit 19 changes real behaviour, not just a screen.** `getSettings()` is already the single
+     reader of the policy singleton (30s cache) and is called at request time by circulation,
+     reservations, fines and the overdue report. A `PATCH /api/settings` therefore affects the
+     next request on every one of them, which is the point of invariant 7 and also the risk.
+   - **Every policy number already has a consumer**, which is what makes the settings screen
+     worth having: `libraryName`, `loanPeriodDays`, `maxActiveLoans`, `maxRenewals`,
+     `renewalExtensionDays`, `finePerDay`, `maxFinePerLoan`, `fineBlockThreshold`,
+     `reservationHoldHours`, `maxReservationsPerMember`, `currencySymbol`.
+     `GET /api/settings/public` already exposes a safe display subset; the admin route must not
+     reuse it, because `fineBlockThreshold` and `maxFinePerLoan` must not reach an unauthenticated
+     client.
+   - **Unit 19 will be the first admin mutation in the app to write an audit row for a policy
+     change** (`settings.update`) — and the first place a `before`/`after` pair in `meta` is worth
+     reading, since a policy number can be reasoned about but not reconstructed from a log entry.
+   - Reuse rather than rebuild: `useChartTokens()` for any chart, `auditPresentation()` for any
+     action chip, `ReportTable`'s column-driven pattern for any new register, and
+     `components/ui/field.tsx` for every input.
    - `getUnreadCount` is already exported from `lib/services/notifications.ts` — do not build a
      second one. `GET /api/members/lookup` and `loansApi.list` already serve the Unit 12 UI.
      `getMemberUnpaidFineTotal` already serves the issue gate.

@@ -1,30 +1,22 @@
 import type { Metadata } from "next";
-import { ScrollText } from "lucide-react";
-import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/auth/session";
-import { ROLE_HOME } from "@/lib/constants";
-import { PlaceholderPage } from "@/components/common/placeholder-page";
+import { AuditScreen } from "@/components/features/audit/audit-screen";
 
 export const metadata: Metadata = {
   title: "Audit Log",
   description: "An immutable record of every important action.",
 };
 
-export default async function AuditLogPage() {
-  // Admin-only route: bounce librarians and members to their own home,
-  // matching the middleware redirect (defence in depth).
-  try {
-    await requireAdmin();
-  } catch {
-    redirect(ROLE_HOME.member);
-  }
-
-  return (
-    <PlaceholderPage
-      title="Audit Log"
-      description="An immutable record of every important action."
-      icon={ScrollText}
-      unit={18}
-    />
-  );
+/**
+ * `/staff/audit` — the audit register.
+ *
+ * **The admin check stays in the page, not only in the route.** The staff layout guarantees a
+ * *staff* session, which is not the same thing: a librarian reaching `/staff/audit` passes the
+ * layout and would otherwise get the register. The API route refuses them with a 403, so they
+ * would see an error where the data is — better to send them to their own home and say why, with
+ * a page they were never entitled to (invariant 2, defence in depth).
+ *
+ * **`dynamic` is inherited from the staff layout.**
+ */
+export default function AuditLogPage() {
+  return <AuditScreen />;
 }

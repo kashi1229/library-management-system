@@ -1,19 +1,25 @@
 import type { Metadata } from "next";
-import { BarChart3 } from "lucide-react";
-import { PlaceholderPage } from "@/components/common/placeholder-page";
+import { REPORT_DEFS } from "@/components/features/reports/reports-screen";
+import { ReportsScreen } from "@/components/features/reports/reports-screen";
 
 export const metadata: Metadata = {
   title: "Reports",
-  description: "Borrowing, overdue, popular titles, fines and inventory.",
+  description: "Borrowing, overdue, popular titles, members, fines and inventory.",
 };
 
-export default async function ReportsPage() {
-  return (
-    <PlaceholderPage
-      title="Reports"
-      description="Borrowing, overdue, popular titles, fines and inventory."
-      icon={BarChart3}
-      unit={18}
-    />
-  );
+/**
+ * `/staff/reports` — the index, which opens the borrowing report.
+ *
+ * **It redirects rather than rendering a landing page.** A list of six report descriptions would
+ * be one more screen between a librarian and the report they came for, and `ReportNav` already
+ * *is* that list — rendered above the report it navigates to. There is nothing a separate index
+ * could say that the nav does not already say, with the bonus that the current report is
+ * highlighted.
+ *
+ * `dynamic` is inherited from the staff layout (`force-dynamic`); this route reads no database
+ * itself.
+ */
+export default function ReportsIndexPage() {
+  const first = REPORT_DEFS[0].type;
+  return <ReportsScreen initialType={first} />;
 }

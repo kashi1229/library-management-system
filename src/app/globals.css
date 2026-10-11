@@ -429,3 +429,73 @@
 @utility text-pretty {
   text-wrap: pretty;
 }
+
+/* ==========================================================================
+   Print (spec 18)
+   ==========================================================================
+   A report is the one screen in this app that is routinely printed, and a
+   printed dashboard is mostly waste: a 264px sidebar, a sticky topbar and a
+   notification bell cost a third of an A4 page and tell the reader nothing.
+
+   "No chrome, ink on white" — and the colours are **forced, not inherited**.
+   The report components carry `print:` utilities for the things they own
+   (borders, backgrounds, the filter rail); this block owns everything the
+   shell wraps around them.
+   ========================================================================== */
+
+@media print {
+  /* Force white paper. Without this the page keeps its cream background and
+     burns toner across the whole sheet. */
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Chrome that carries no information on paper. */
+  aside,
+  header,
+  nav[aria-label="Reports"],
+  nav[aria-label="Report pagination"],
+  nav[aria-label="Audit pagination"],
+  [data-slot="toaster"] {
+    display: none !important;
+  }
+
+  /* The shell is a flex row of sidebar + main. With the sidebar gone the main
+     still reserves its padding, which pushes the report into a narrow column
+     with a ragged right margin. */
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    width: 100% !important;
+  }
+
+  /* A report spanning two pages is only readable if the header repeats on the
+     second one, and a row split across a page break is ambiguous. */
+  table {
+    page-break-inside: auto;
+    width: 100%;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    page-break-inside: avoid;
+  }
+
+  /* A rounded box with a tint prints as a grey smear, so cards lose both. */
+  [data-slot="card"] {
+    box-shadow: none !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  /* No "open this in a browser" tails on a sheet of paper. */
+  a[href]::after {
+    content: none;
+  }
+}

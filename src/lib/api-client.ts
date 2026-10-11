@@ -8,6 +8,7 @@ import type {
   FineStatus,
   LoanView,
   PaymentMethod,
+  ReportType,
   ReservationStatus,
   StaffRole,
   UserStatus,
@@ -15,6 +16,7 @@ import type {
 import type { CategoryIconName } from "@/lib/validators/category";
 import type { BookStatusFilter, PublicBookSort } from "@/lib/validators/book";
 import type {
+  AuditListResult,
   BookDetail,
   BookSummary,
   CatalogBook,
@@ -24,7 +26,30 @@ import type {
   MemberRecord,
   PageMeta,
   PublicUser,
+  ReportResult,
 } from "@/types";
+
+/** The query shape `GET /api/reports/:type` accepts. */
+export type ReportFilters = {
+  from?: string;
+  to?: string;
+  categoryId?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
+  page?: number;
+  limit?: number;
+};
+
+/** The query shape `GET /api/audit` accepts. */
+export type AuditFilters = {
+  actor?: string;
+  action?: string;
+  from?: string;
+  to?: string;
+  q?: string;
+  page?: number;
+  limit?: number;
+};
 
 // Fine wire shapes are **imported** (so this file can use them) and separately re-exported
 // below for components. `export … from` alone does not bring a name into local scope.
@@ -822,6 +847,37 @@ export const settingsApi = {
 export type ListPayload<T> = {
   items: T[];
   meta?: { page: number; limit: number; total: number; totalPages: number };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Reports & Audit (spec 18)                                                   */
+/* -------------------------------------------------------------------------- */
+
+export const reportsApi = {
+  /**
+   * **The fetcher takes no positional parameters.** SWR calls `fetcher(key)`, so a
+   * `(signal?: AbortSignal)` first argument receives the **string cache key** and hands it to
+   * `fetch` — `Failed to convert value to 'AbortSignal'`. This has bitten this codebase three
+   * times now, so the cancellation is hand-rolled and the signature is deliberately empty.
+   */
+  get: (type: ReportType, filters: ReportFilters = {}) =>
+    request<ReportResult>(`/reports/${type}`, { query: filters }),
+
+  /**
+   * The CSV download URL, built as a plain link rather than fetched.
+   *
+   * **`fetch` + `blob` would work and is worse.** A download has to carry the server's
+   * `Content-Disposition` filename to the browser, and re-creating that filename in the browser
+   * is how a file called `download` ends up on somebody's desktop. An `<a href>` lets the browser
+   * do the whole round trip: it streams to disk, names the file from the header, and never loads
+   * a 2 MB report into a tab's memory first.
+   */
+  csvUrl: (type: ReportType, filters: ReportFilters = {}) =>
+    `/api/reports/${type}${buildQuery({ ...filters, format: "csv" })}`,
+};
+
+export const auditApi = {
+  list: (filters: AuditFilters = {}) => request<AuditListResult>("/audit", { query: filters }),
 };
 
 /** Narrow an unknown thrown value into something safe to show a user. */

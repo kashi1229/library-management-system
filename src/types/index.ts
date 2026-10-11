@@ -6,6 +6,7 @@ import type {
   LoanStatus,
   NotificationType,
   PaymentMethod,
+  ReportType,
   ReservationStatus,
   Role,
   UserStatus,
@@ -626,6 +627,89 @@ export type WishlistItem = {
   /** The catalog book, so the card shows the same cover, rating and availability. */
   book: CatalogBook;
   savedAt: string;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Reports & Audit (spec 18)                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One report, as the UI receives it.
+ *
+ * **`rows` is `Record<string, …>` rather than six different row types.** The spec calls for one
+ * table component across six reports; a union of six row shapes would force that component into a
+ * switch with six near-identical branches, and the day a seventh report appears the switch grows
+ * a `default` that silently renders blanks. The `columns` array is the contract, and `ReportTable`
+ * reads only the keys it is given — so a column that a row is missing renders an em dash rather
+ * than throwing.
+ *
+ * **Values are already formatted by the service.** A report is exported to CSV and printed on
+ * paper as well as read on screen, and three formatters for one date is three places for them to
+ * disagree. Money is rendered with the library's currency, dates as `d MMM yyyy`, and the numbers
+ * are the numbers.
+ */
+export type ReportColumn = {
+  key: string;
+  label: string;
+  align?: "left" | "right";
+  /** `primary` renders in the medium weight — for the identifier column of a row. */
+  emphasis?: boolean;
+};
+
+export type ReportSummaryItem = {
+  label: string;
+  value: string;
+  tone?: "default" | "success" | "warning" | "danger";
+};
+
+export type ReportRow = Record<string, string | number | null>;
+
+export type ReportResult = {
+  type: ReportType;
+  title: string;
+  description: string;
+  /** 3–4 figures, as the spec asks. Their sum relationship to `rows` is the spec's first check. */
+  summary: ReportSummaryItem[];
+  columns: ReportColumn[];
+  rows: ReportRow[];
+  /** Row count *before* pagination, so the summary can say "of 412" honestly. */
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  /** The date range actually applied, echoed so the UI can say "12 Aug – 10 Oct". */
+  range: { from: string | null; to: string | null };
+};
+
+/**
+ * One audit entry, as the admin viewer receives it.
+ *
+ * **`actor` is resolved to a name**, because a column of ObjectIds is unreadable and the whole
+ * point of an audit trail is being able to see who did what. It is resolved server-side in one
+ * `$in` batch, exactly as every other list in this app resolves its book and member references.
+ */
+export type AuditListItem = {
+  id: string;
+  actor: { id: string; name: string; role: Role } | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+  /** The summary recorded **at the time of the action** — never re-derived. */
+  summary: string;
+  /** Structured detail, shown when the row is expanded. */
+  meta: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type AuditListResult = {
+  items: AuditListItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  /** The distinct actions present in the whole log, so the filter offers real choices rather
+   *  than a free-text box that can only ever be wrong. */
+  actions: string[];
 };
 
 /* -------------------------------------------------------------------------- */
