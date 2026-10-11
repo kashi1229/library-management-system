@@ -65,18 +65,60 @@ export function invalidateSettings(): void {
   cache = null;
 }
 
+import { logAudit } from "@/lib/services/audit";
+import { updateSettingsSchema, type UpdateSettingsInput } from "@/lib/validators/settings";
+
 /**
- * Partial update of the policy singleton.
+ * Partial update of the policy singleton (Unit 19).
  *
- * Implemented in **Unit 19** (Settings admin UI) — Unit 02 lands the accessor and
- * cache invalidation so later units can read policy values safely.
+ * Validates with Zod, updates the global singleton, busts the in-memory cache,
+ * and writes an audit log entry listing the changed keys.
  */
 export async function updateSettings(
-  _patch: Partial<SettingDoc>,
-  _actor: Actor,
+  patch: UpdateSettingsInput,
+  actor: Actor,
 ): Promise<SettingDoc> {
+  const validated = updateSettingsSchema.parse(patch);
+
+  // Read current settings to compare changed keys for audit
+  const current = await getSettings();
+
+  const changedKeys: Record<string, { from: unknown; to: unknown }> = {};
+  for (const [key, value] of Object.entries(validated)) {
+    if (value !== undefined) {
+      const currentVal = (current as unknown as Record<string, unknown>)[key];
+      if (currentVal !== value) {
+        changedKeys[key] = { from: currentVal, to: value };
+      }
+    }
+  }
+
+  const updated = await Setting.findOneAndUpdate(
+    { key: SINGLETON_KEY },
+    { $set: validated },
+    { new: true, runValidators: true, lean: true },
+  ).lean<SettingDoc>();
+
+  if (!updated) {
+    throw new Error("Failed to update settings singleton.");
+  }
+
+  // Immediately invalidate in-memory cache
   invalidateSettings();
-  throw new Error("updateSettings() is implemented in Unit 19.");
+
+  if (Object.keys(changedKeys).length > 0) {
+    const keysSummary = Object.keys(changedKeys).join(", ");
+    await logAudit({
+      actor,
+      action: "settings.update",
+      entityType: "Setting",
+      entityId: updated._id,
+      summary: `Updated library settings (${keysSummary})`,
+      meta: { changes: changedKeys },
+    });
+  }
+
+  return updated;
 }
 
 /** The safe subset exposed to anonymous visitors by `GET /api/settings/public`. */

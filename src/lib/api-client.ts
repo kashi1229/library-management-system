@@ -835,9 +835,58 @@ export type PublicPolicy = {
   reservationHoldHours: number;
 };
 
+export type FullSettings = {
+  _id: string;
+  libraryName: string;
+  contactEmail: string | null;
+  loanPeriodDays: number;
+  maxActiveLoans: number;
+  maxRenewals: number;
+  renewalExtensionDays: number;
+  finePerDay: number;
+  maxFinePerLoan: number;
+  fineBlockThreshold: number;
+  reservationHoldHours: number;
+  maxReservationsPerMember: number;
+  currencyCode: string;
+  currencySymbol: string;
+  lastMaintenanceAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UpdateSettingsPayload = Partial<
+  Omit<FullSettings, "_id" | "createdAt" | "updatedAt" | "lastMaintenanceAt">
+>;
+
+export type MaintenanceResult = {
+  expiredReservations: number;
+  dueSoon: number;
+  overdue: number;
+  skipped?: boolean;
+};
+
 export const settingsApi = {
   /** Public and unauthenticated. Used to render due dates and policy copy. */
   public: (signal?: AbortSignal) => request<PublicPolicy>("/settings/public", { signal }),
+
+  /** Full settings (admin only). */
+  get: (signal?: AbortSignal) => request<FullSettings>("/settings", { signal }),
+
+  /** Partial update settings (admin only). */
+  update: (data: UpdateSettingsPayload, signal?: AbortSignal) =>
+    request<FullSettings>("/settings", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+      signal,
+    }),
+
+  /** Run maintenance immediately (admin only). */
+  runMaintenance: (signal?: AbortSignal) =>
+    request<{ counts: MaintenanceResult; triggeredBy: string }>("/maintenance/run", {
+      method: "POST",
+      signal,
+    }),
 };
 
 /* -------------------------------------------------------------------------- */
