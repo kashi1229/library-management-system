@@ -1,5 +1,6 @@
 ﻿import { z } from "zod";
 import { UPLOAD_FOLDERS } from "@/lib/constants";
+import { UPLOAD_LIMITS, type CloudinaryFolder } from "@/lib/cloudinary-shared";
 
 /**
  * Upload request schemas.
@@ -51,6 +52,33 @@ export const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"] as const;
 
 export type FileRejection = { ok: false; reason: string };
 
+/** `jpg` → `JPG`, `webp` → `WebP`, so the label reads like English, not like a config file. */
+const FORMAT_LABELS: Record<string, string> = {
+  jpg: "JPG",
+  jpeg: "JPEG",
+  png: "PNG",
+  webp: "WebP",
+};
+
+/**
+ * The one sentence that tells a user what an uploader accepts, e.g.
+ * `JPG, JPEG, PNG or WebP · up to 5MB`.
+ *
+ * Derived from `UPLOAD_LIMITS` so the text **cannot** drift from the cap that is
+ * actually enforced. A hardcoded hint once claimed 3MB for covers while the real
+ * cap was 5MB, which is worse than no hint at all — nothing can contradict a number
+ * that has no source. `maxSizeMB` mirrors the `ImageUploader` override.
+ */
+export function uploadLimitLabel(folder: CloudinaryFolder, maxSizeMB?: number): string {
+  const formats = UPLOAD_LIMITS[folder].formats.map((format) => FORMAT_LABELS[format] ?? format);
+  const list =
+    formats.length <= 1
+      ? (formats[0] ?? "")
+      : `${formats.slice(0, -1).join(", ")} or ${formats[formats.length - 1]}`;
+
+  return `${list} · up to ${maxSizeMB ?? UPLOAD_LIMITS[folder].maxSizeMB}MB`;
+}
+
 /**
  * Validate a picked file. Checks MIME type *and* extension so a renamed `.exe`
  * is rejected even if a browser reports a permissive type.
@@ -71,7 +99,9 @@ export function validateImageFile(
   }
 
   if (file.size > maxBytes) {
-    const sizeMb = (file.size / 1024 / 1024).toFixed(1);
+    // Round **up** to one decimal: a file one byte over the cap must never print as
+    // "5.0MB" directly beside a 5MB limit, which reads as a contradiction.
+    const sizeMb = (Math.ceil((file.size / (1024 * 1024)) * 10) / 10).toFixed(1);
     return { ok: false, reason: `That image is ${sizeMb}MB. The limit is ${maxSizeMB}MB.` };
   }
 

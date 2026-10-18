@@ -58,6 +58,37 @@ Fixed in `lib/cloudinary.ts` `signUpload()`. Uploads now return 200.
   corrected to match the measurements. `architecture.md` §Image upload contract and the
   `api-contract.md` note were updated for the same reason.
 
+## Follow-up — the accepted file size: a test, and the text that states it
+
+Requested after the 401 fix. Both asks turned out to be the same defect seen from two sides.
+
+- **The books form told users the wrong maximum.** `hint="JPG, PNG or WebP · up to 3MB · 2:3 ratio"`
+  on a folder whose real cap is **5MB** (`UPLOAD_LIMITS.covers`). Nothing enforced that number and
+  nothing could contradict it. The profile page was right only by accident — it passed no `hint` and
+  fell through to the default.
+- **Fixed by removing the possibility, not the typo.** `uploadLimitLabel(folder, maxSizeMB?)` now
+  derives the wording from `UPLOAD_LIMITS`, and `ImageUploader` renders it **twice**: inside the
+  drop-zone box (where the user is while choosing a file) and under the controls. A caller's `hint`
+  is now *additional* copy — the form passes `hint="2:3 ratio"` and the size comes from the one
+  source. There is no longer a place to hardcode a cap.
+- **`npm test` now exists.** `tsx --test "src/**/*.test.ts"` — Node's built-in runner, so **no new
+  dependency**. `src/lib/validators/upload.test.ts` pins the boundary that matters: exactly the cap
+  accepted, one byte over rejected, per folder, plus the label agreeing with the enforced cap.
+- **Why this file is the one that deserved tests.** The size cap is the only upload constraint a
+  crafted request walks past (Cloudinary ignores `max_file_size`), so `validateImageFile` *is* the
+  enforcement — and an off-by-one there is a silent policy change that `tsc` and `eslint` cannot see.
+- **The suite was checked for teeth, not just green:** setting `covers.maxSizeMB` to 3 made it fail
+  (`expected 'up to 5MB', actual 'up to 3MB'`); restoring it returned 16/16.
+- **Rejection text now rounds the size up.** A file one byte over the cap used to print
+  `That image is 5.0MB. The limit is 5MB.`, which reads as a contradiction. It now says `5.1MB`.
+- **Verified in the running app** (the developer's own server on port 3000, reused rather than
+  restarted): **10/10** checks — a registered member's `/profile` states 3MB and never 5MB; a
+  temporary librarian's `/staff/books/new` states 5MB, keeps the 2:3 hint, and no longer mentions
+  3MB; the cap appears twice on `/profile`. Both throwaway accounts were deleted from Mongo
+  afterwards.
+- `project-overview.md` (a suite now exists; still listed under Out of Scope as an optional extra)
+  and `code-standards.md` (new §Tests: `node:test` only, no new dependency) were updated.
+
 ## Completed
 
 ### Unit 20 — Landing Page Rebuild ✅ · `feat/20-landing-rebuild`

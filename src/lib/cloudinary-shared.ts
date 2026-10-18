@@ -73,8 +73,29 @@ export function isOwnedAsset(publicId: string, folder: CloudinaryFolder): boolea
 /* Delivery URL helpers                                                        */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The cloud name, resolved from whichever variable this side of the wire can see.
+ *
+ * Two variables describe **one** value, and they were not equal: `dbm0wycl6` in
+ * `CLOUDINARY_CLOUD_NAME` against `lms` in `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME`.
+ * Server code that read the public one built `res.cloudinary.com/lms/...`, which
+ * 404s on every image — the account lives under the first name. The server value
+ * is therefore authoritative and the public one is only a fallback for the browser,
+ * where `CLOUDINARY_CLOUD_NAME` is stripped from the bundle entirely.
+ *
+ * Both reads are written as direct `process.env.X` member expressions on purpose:
+ * that is the only form Next inlines into a client build, so passing this function
+ * a value assembled some other way would silently produce an empty cloud name.
+ */
+export function resolveCloudName(
+  serverValue: string | undefined = process.env.CLOUDINARY_CLOUD_NAME,
+  publicValue: string | undefined = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+): string {
+  return (serverValue || publicValue || "").trim();
+}
+
 export type CloudinaryTransform = {
-  /** Cloud name. Defaults to `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME`. */
+  /** Cloud name. Defaults to `resolveCloudName()`. */
   cloudName?: string;
   width?: number;
   height?: number;
@@ -108,7 +129,7 @@ export function cloudinaryUrl(
     crop,
   }: CloudinaryTransform = {},
 ): string {
-  const cloud = cloudName ?? process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+  const cloud = cloudName ?? resolveCloudName();
   const id = publicId?.trim();
   if (!cloud || !id) return "";
 

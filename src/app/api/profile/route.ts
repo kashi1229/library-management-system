@@ -46,12 +46,13 @@ export const PATCH = handler(
       // taken from the client. A crafted `url` would otherwise be stored and
       // rendered to other users (staff see it in the circulation desk), turning
       // the avatar field into a stored cross-user content/tracking primitive.
+      //
+      // `cloudinaryUrl` resolves the cloud name itself. It used to be passed
+      // `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` explicitly, which put a stale copy of
+      // the cloud name in charge of the server and 404'd every avatar.
       nextAvatar = {
         publicId: input.avatar.publicId,
-        url: cloudinaryUrl(input.avatar.publicId, {
-          ...AVATAR_TRANSFORM,
-          cloudName: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
-        }),
+        url: cloudinaryUrl(input.avatar.publicId, AVATAR_TRANSFORM),
       };
     }
 

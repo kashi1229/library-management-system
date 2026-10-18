@@ -160,6 +160,8 @@ Everything in F1–F18 above, English-only UI, desktop and mobile web, seed scri
 - Multi-branch/multi-library, inter-library loans, acquisition/vendor management, book purchasing.
 - Real-time sockets, native mobile apps, multilingual/i18n, AI features.
 - Automated test suites beyond the manual verification checklists (optional extra, not required).
+  **One now exists:** `npm test` runs `node:test` suites through `tsx` — no new dependency — currently
+  covering the upload limits (`src/lib/validators/upload.test.ts`).
 
 ## Success Criteria
 - A visitor can register, sign in, browse and search the catalog, and open a book detail page.

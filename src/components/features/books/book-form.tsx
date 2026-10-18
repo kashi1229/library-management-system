@@ -230,7 +230,7 @@ export function BookForm({
                 value={cover ?? null}
                 onChange={(next) => setValue("cover", next, { shouldDirty: true })}
                 disabled={disabled}
-                hint="JPG, PNG or WebP · up to 3MB · 2:3 ratio"
+                hint="2:3 ratio"
               />
             </CardContent>
           </Card>

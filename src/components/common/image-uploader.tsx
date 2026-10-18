@@ -10,7 +10,7 @@ import { transitions } from "@/lib/motion";
 import { usePrefersReducedMotion } from "@/hooks/use-motion-variants";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
-import { validateImageFile } from "@/lib/validators/upload";
+import { validateImageFile, uploadLimitLabel } from "@/lib/validators/upload";
 import { UPLOAD_LIMITS, withTransform } from "@/lib/cloudinary-shared";
 import type { CloudinaryFolder } from "@/lib/cloudinary-shared";
 import { uploadsApi } from "@/lib/api-client";
@@ -62,6 +62,9 @@ export function ImageUploader({
 }: ImageUploaderProps) {
   const limits = UPLOAD_LIMITS[folder];
   const sizeLimit = maxSizeMB ?? limits.maxSizeMB;
+  // One source of truth for the accepted formats *and* the cap, so the text a user
+  // reads can never disagree with the check that rejects their file.
+  const limitLabel = uploadLimitLabel(folder, maxSizeMB);
 
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [state, setState] = React.useState<UploadState>({ phase: "idle" });
@@ -190,6 +193,9 @@ export function ImageUploader({
                 browse
               </button>
             </p>
+            {/* The cap sits inside the box, not only underneath it: the drop zone is
+                what the user is looking at while choosing a file. */}
+            <p className="text-caption text-muted-foreground/80">{limitLabel}</p>
           </div>
         )}
 
@@ -286,8 +292,10 @@ export function ImageUploader({
           </Button>
         ) : null}
 
+        {/* A caller's `hint` is *extra* copy (e.g. the 2:3 ratio), never a replacement
+            for the size — a hand-written cap is exactly the thing that goes stale. */}
         <p className="text-caption text-muted-foreground">
-          {hint ?? `JPG, PNG or WebP · up to ${sizeLimit}MB`}
+          {hint ? `${limitLabel} · ${hint}` : limitLabel}
         </p>
       </div>
 

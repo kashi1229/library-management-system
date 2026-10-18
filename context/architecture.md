@@ -81,6 +81,7 @@ type agree **by construction** rather than by relying on `JSON.stringify` to coe
 ## Image upload contract
 
 1. Client validates MIME type **and** extension and the size cap (fast UX check only).
+   The cap is the only enforcement we control — see step 4.
 2. `POST /api/uploads/sign` returns `{ signature, timestamp, apiKey, cloudName, folder, allowedFormats,
    maxFileSizeBytes }`. `folder` is a zod enum whitelist; `covers` additionally requires a staff role.
 3. The client POSTs the file straight to Cloudinary with `XMLHttpRequest` (the only browser API that
@@ -92,10 +93,14 @@ type agree **by construction** rather than by relying on `JSON.stringify` to coe
    `Invalid Signature`. `folder` and `allowed_formats` are therefore tamper-proof; the size cap is not —
    a signed direct upload ignores `max_file_size` (verified: 1.9MB accepted under a 1KB cap), so the
    cap rests on `validateImageFile` plus account storage limits until a signed **upload preset** pins it.
-5. `PATCH /api/profile` **derives the delivery URL from the `publicId` on the server** and ignores any
+5. **The uploader never states its own cap.** `uploadLimitLabel(folder, maxSizeMB?)` derives the wording
+   from `UPLOAD_LIMITS`, and it is rendered twice — inside the drop-zone box and under the controls. A
+   caller's `hint` is *additional* copy, never a replacement. This is not cosmetic: the books form
+   hardcoded `up to 3MB` for a folder whose cap is 5MB, so the UI rejected nothing and lied about it.
+6. `PATCH /api/profile` **derives the delivery URL from the `publicId` on the server** and ignores any
    client-supplied `url`. The avatar URL is rendered to other users (staff see it at the desk), so a
    client-controlled URL would be a stored cross-user content/tracking primitive.
-6. `DELETE /api/uploads` — staff may delete `athenaeum/covers/*` (detaching it from any book first, and
+7. `DELETE /api/uploads` — staff may delete `athenaeum/covers/*` (detaching it from any book first, and
    writing an audit entry); a member may delete **only their own current avatar**.
 
 ## System Boundaries (folder ownership)

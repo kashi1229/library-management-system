@@ -59,6 +59,11 @@ Errors: services throw `AppError(code, message, status, fields?)`; the wrapper c
 ## Security
 - bcrypt hash, JWT in httpOnly cookie, zod on all inputs, `escape` regex for search strings, never echo internal errors, rate-limit login, CSRF mitigated by SameSite=Lax + JSON-only mutation endpoints that require `Content-Type: application/json`.
 
+## Tests
+- `npm test` = `tsx --test "src/**/*.test.ts"` (Node's built-in runner; `tsx` is already a devDependency).
+- Co-locate a suite as `<module>.test.ts`. No new test dependency — if a case needs a framework, use `node:test` + `node:assert/strict`.
+- Test the boundary and the value a **user can see**, not the happy path: an off-by-one in a size cap is a silent policy change that `tsc` and `eslint` cannot see.
+
 ## Git & Hygiene
 - Branch per unit: `feat/NN-feature-name`. Conventional commits (`feat:`, `fix:`, `chore:`).
 - `.env.local` never committed; provide `.env.example`.
