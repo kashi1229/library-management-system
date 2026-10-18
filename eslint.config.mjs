@@ -23,6 +23,19 @@ const eslintConfig = defineConfig([
       "no-console": ["warn", { allow: ["warn", "error"] }],
     },
   },
+  /*
+   * CLI scripts under `scripts/`.
+   *
+   * `no-console` is kept on for application code so the browser never leaks
+   * progress into the user's console and server-side logs stay structured. A seed
+   * script's output *is* its interface, so it is exempt — same reasoning as the
+   * `qa17` exclusion below, but for a script that is committed rather than
+   * throwaway.
+   */
+  {
+    files: ["scripts/**/*.ts", "scripts/**/*.mjs"],
+    rules: { "no-console": "off" },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

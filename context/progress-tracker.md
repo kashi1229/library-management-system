@@ -89,6 +89,77 @@ Requested after the 401 fix. Both asks turned out to be the same defect seen fro
 - `project-overview.md` (a suite now exists; still listed under Out of Scope as an optional extra)
   and `code-standards.md` (new §Tests: `node:test` only, no new dependency) were updated.
 
+## Hotfix — Settings save returned 422 on every attempt
+
+**Reported by the developer as:** editing anything on `/staff/settings` and pressing *Save changes*
+answered `POST /api/settings 422`. Fixed. Three separate defects stacked behind one symptom.
+
+- **Cause 1 — the request body was double-encoded.** `settingsApi.update` passed
+  `body: JSON.stringify(data)` to the client, but `send()` already runs `JSON.stringify` on the body it
+  is given. The route therefore parsed a JSON **string**, and the schema answered
+  `Invalid input: expected object, received string` — under the key `_form`, which is not a field, so
+  the admin had nothing to look at. The 422 body is what identified this; a unit test could not, because
+  `body` is typed `unknown` and `tsc`/`eslint` are both blind to it. `src/lib/api-client.test.ts` now
+  stubs `fetch` and asserts the outgoing body parses to an **object**. It was checked for teeth:
+  re-adding the extra `JSON.stringify` fails the suite.
+- **Cause 2 — the form threw away the server's field errors.** `handleSave` caught the failure and
+  toasted `toErrorMessage(err)` — the generic *"Please check the highlighted fields."* — while
+  `ApiRequestError.fields` was never mapped onto the inputs. Every other form in this app
+  (`book-form`, `details-tab`, `security-tab`, `register-form`, the category and team dialogs) already
+  did that mapping; this one form was the exception. It now sets `errors` from the response.
+- **Cause 3 — the browser swallowed the submit.** The form was the **only** one in the codebase
+  without `noValidate`, so `type="email"`, `min`/`max` and `maxLength` constraints intercepted the
+  submit event before `handleSave` ran. The admin saw a transient native bubble and, if they then
+  pressed save again, a 422 with nothing highlighted. Caught only in a real browser: an HTTP-level
+  check cannot see an event that never fires.
+- **The duplication that made causes 1 and 3 survivable is gone.** The form hand-rolled twelve range
+  checks beside `updateSettingsSchema`, and two rules never made the copy — `contactEmail` had none at
+  all, and `libraryName`'s 80-character ceiling was missing. `validate()` now runs the server's own
+  schema (`toPayload()` builds the one payload both validation and submission use, so they cannot
+  disagree), and `api/settings/route.ts` uses `parseBody` like every other route.
+- **Verified in headless Chrome against the running app: 8/8** — an invalid contact email and an
+  81-character name both produce an inline `role="alert"` message **with no request issued**; a valid
+  save returns 200, persists, and toasts; **0 console errors**. The screenshot shows the danger-ringed
+  field with its message beneath it.
+
+## Seed — `npm run seed`
+
+The database moved to an Atlas cluster, so `scripts/seed.ts` builds a working library from nothing.
+
+- **6 categories, 1 admin, 8 members, 12 books — 11 with real cover art.** One book (Chomsky's
+  *Structure and Interpretation*) has no published Open Library cover and falls back to the app's
+  generated typographic cover, which the catalog screenshot shows working.
+- **Covers are fetched from Open Library by ISBN and uploaded through the browser's own signed-upload
+  pipeline** (`signUpload()` from `lib/cloudinary`), so seeding also exercises the 401 fix on every
+  book rather than writing around it.
+- **The seed uses the Mongoose models, not the raw driver**, because three constraints are invisible in
+  the types: `User.membershipId` and `Book.isbn` are *sparse* unique indexes (a stored `null` collides),
+  `Book.availableCopies` has a `pre("validate")` guard, and **a fresh Atlas cluster has no indexes at
+  all** until `Model.init()` runs.
+- **It is idempotent**, keyed on `email` and `slug`, and `--dry-run` reports without writing. Note
+  that `npm run seed -- --dry-run` does **not** forward the flag on this npm version; run
+  `npx tsx --conditions=react-server scripts/seed.ts --dry-run` instead. (This bit me: a dry run I
+  believed was a dry run wrote the categories and the admin before failing.)
+- **Membership ids are allocated against what is in the collection**, not from the array index. The
+  first run died on `E11000 … membershipId_1 dup key: LIB-2026-0001` because the cluster already held
+  a member holding that id — and a bare duplicate-key error for a record that does not exist yet is
+  exactly the failure `data-model.md` warns about.
+- **Connecting to Atlas needed an SRV fallback.** This network's resolver answers the SRV query with
+  target names outside the cluster's domain (`ac-xxxx-shard-00-00`), which the driver and Mongoose both
+  reject as *"Server record does not share hostname with parent URI"* — **before** authenticating, so
+  the message says nothing about the credentials. The seed tries SRV, then the parent hostname, which
+  turns a cryptic failure into the real one. **The running app needs the same treatment**: it connects
+  with the SRV URI and will fail the same way.
+- `scripts/load-env.ts` puts `.env.local` into `process.env` as the **first** import. Without it
+  `lib/db.ts` logs *"MONGODB_URI is not set"* and the connection never happens — the import must
+  precede the app modules, so it cannot be done inside `main()`.
+- `eslint.config.mjs` gained a `scripts/**` override allowing `console.log`. `no-console` exists to keep
+  *application* code off the terminal; a seed's output is its interface.
+- **Verified through the running app**: admin sign-in (`admin@gmail.com` / `@Kashi1229`) → 200 with
+  `role: admin`; a seeded member signs in with `LIB-2026-0002`; `/api/books` returns 12 rows, 11 with
+  covers; `/api/public/stats` reports 12 books / 37 copies / 9 members; `/catalog` renders all ten
+  sampled titles with **11/11 cover images loaded, 0 broken**, 0 console errors, 0 failed requests.
+
 ## Completed
 
 ### Unit 20 — Landing Page Rebuild ✅ · `feat/20-landing-rebuild`
@@ -2574,9 +2645,13 @@ console.)**
 Unit 07 needed a librarian to verify with, and the register endpoint only ever creates a member by design,
 so an admin was inserted directly into MongoDB: **`admin@gmail.com`** (role `admin`, bcrypt cost 10
 matching `lib/auth/password.ts`, and no `membershipId`, since that field's sparse unique index rejects a
-stored `null`). The bootstrap script lives in the QA folder outside the repo, so the credential is not
-committed. Sign in with it to reach `/staff/*`; a member is silently redirected to `/dashboard` by
+stored `null`). Sign in with it to reach `/staff/*`; a member is silently redirected to `/dashboard` by
 `proxy.ts` rather than shown an error, which looks like a missing page.
+
+**`npm run seed` now creates and resets this account** (password `@Kashi1229`, printed in the summary),
+along with 8 members and 12 books. The bootstrap script this paragraph used to point at lived in the QA
+folder outside the repo and is gone; the seed replaces it, carries no credentials in source — it reads
+`.env.local` — and is safe to commit.
 
 ## Session Notes
 - Start every session by reading `CLAUDE.md`, then all files it lists, then the current unit spec.
