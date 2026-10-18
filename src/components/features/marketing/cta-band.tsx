@@ -77,7 +77,7 @@ export function CtaBand() {
               initial={reduced ? false : { height: 0, opacity: 0 }}
               whileInView={
                 reduced
-                  ? false
+                  ? undefined
                   : {
                       height: spine.h,
                       opacity: 1,
