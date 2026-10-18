@@ -22,7 +22,7 @@ import { Field } from "@/components/ui/field";
 import { Spinner } from "@/components/common/spinner";
 import { EmptyState } from "@/components/common/empty-state";
 import { settingsApi, toErrorMessage, type FullSettings } from "@/lib/api-client";
-import { cn, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 type SettingsFormData = {
   libraryName: string;
@@ -40,6 +40,41 @@ type SettingsFormData = {
   currencySymbol: string;
 };
 
+/**
+ * Seed the editable form from the saved record.
+ *
+ * **One mapping, not three.** The version this replaced built the same object in an effect, in
+ * "Revert", and once more inline — and the three copies were free to drift, which is how the
+ * Unit 08 payload mismatch happened in the first place.
+ */
+function toFormData(settings: FullSettings): SettingsFormData {
+  return {
+    libraryName: settings.libraryName ?? "",
+    contactEmail: settings.contactEmail ?? "",
+    loanPeriodDays: settings.loanPeriodDays ?? 14,
+    maxActiveLoans: settings.maxActiveLoans ?? 5,
+    maxRenewals: settings.maxRenewals ?? 2,
+    renewalExtensionDays: settings.renewalExtensionDays ?? 7,
+    finePerDay: settings.finePerDay ?? 5,
+    maxFinePerLoan: settings.maxFinePerLoan ?? 250,
+    fineBlockThreshold: settings.fineBlockThreshold ?? 100,
+    reservationHoldHours: settings.reservationHoldHours ?? 48,
+    maxReservationsPerMember: settings.maxReservationsPerMember ?? 3,
+    currencyCode: settings.currencyCode ?? "USD",
+    currencySymbol: settings.currencySymbol ?? "$",
+  };
+}
+
+/**
+ * Fetches the settings and owns the loading / error / empty states.
+ *
+ * **It renders no form itself.** The editor below is given a `key` derived from the saved values,
+ * so a save re-seeds the fields by remounting them — which is the "keyed so values come from
+ * props with no reset effect" pattern `CategoryDialog` already uses. The version this replaced
+ * wrote the fields back from a `useEffect`, which React 19's `set-state-in-effect` rule rejects
+ * and which is also a genuine defect: the effect runs after paint, so the form briefly shows
+ * empty inputs before the first response lands.
+ */
 export function SettingsForm({ initialSettings }: { initialSettings?: FullSettings }) {
   const { data: settings, error, isLoading, mutate } = useSWR(
     "/api/settings",
@@ -47,35 +82,58 @@ export function SettingsForm({ initialSettings }: { initialSettings?: FullSettin
     { fallbackData: initialSettings },
   );
 
-  const [formData, setFormData] = React.useState<SettingsFormData | null>(null);
+  if (isLoading && !settings) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24" aria-busy="true">
+        <Spinner label="Loading settings" />
+      </div>
+    );
+  }
+
+  if (error && !settings) {
+    return (
+      <Card className="rounded-xl border border-danger/30 p-4">
+        <EmptyState
+          icon={AlertTriangle}
+          title="Could not load settings"
+          description={toErrorMessage(error)}
+          action={<Button onClick={() => mutate()}>Retry</Button>}
+        />
+      </Card>
+    );
+  }
+
+  if (!settings) return null;
+
+  return (
+    <SettingsEditor
+      /*
+       * Derived from the *saved values*, not from `updatedAt`. Running maintenance also bumps
+       * `updatedAt`, and keying on that would silently discard an admin's unsaved edits because
+       * they pressed the wrong button. Thirteen short fields stringify to well under a
+       * millisecond, and this changes exactly when — and only when — the form must re-seed.
+       */
+      key={JSON.stringify(toFormData(settings))}
+      settings={settings}
+      onMutate={mutate}
+    />
+  );
+}
+
+function SettingsEditor({
+  settings,
+  onMutate,
+}: {
+  settings: FullSettings;
+  onMutate: (data?: FullSettings, opts?: { revalidate?: boolean }) => Promise<unknown>;
+}) {
+  const [formData, setFormData] = React.useState<SettingsFormData>(() => toFormData(settings));
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = React.useState(false);
   const [isMaintaining, setIsMaintaining] = React.useState(false);
 
-  // Sync form state when remote settings arrive
-  React.useEffect(() => {
-    if (settings) {
-      setFormData({
-        libraryName: settings.libraryName ?? "",
-        contactEmail: settings.contactEmail ?? "",
-        loanPeriodDays: settings.loanPeriodDays ?? 14,
-        maxActiveLoans: settings.maxActiveLoans ?? 5,
-        maxRenewals: settings.maxRenewals ?? 2,
-        renewalExtensionDays: settings.renewalExtensionDays ?? 7,
-        finePerDay: settings.finePerDay ?? 5,
-        maxFinePerLoan: settings.maxFinePerLoan ?? 250,
-        fineBlockThreshold: settings.fineBlockThreshold ?? 100,
-        reservationHoldHours: settings.reservationHoldHours ?? 48,
-        maxReservationsPerMember: settings.maxReservationsPerMember ?? 3,
-        currencyCode: settings.currencyCode ?? "USD",
-        currencySymbol: settings.currencySymbol ?? "$",
-      });
-    }
-  }, [settings]);
-
   // Compute dirty state
   const isDirty = React.useMemo(() => {
-    if (!settings || !formData) return false;
     return (
       formData.libraryName !== settings.libraryName ||
       formData.contactEmail !== (settings.contactEmail ?? "") ||
@@ -94,7 +152,7 @@ export function SettingsForm({ initialSettings }: { initialSettings?: FullSettin
   }, [settings, formData]);
 
   const handleChange = (key: keyof SettingsFormData, value: string | number) => {
-    setFormData((prev) => (prev ? { ...prev, [key]: value } : prev));
+    setFormData((prev) => ({ ...prev, [key]: value }));
     setErrors((prev) => {
       if (!prev[key]) return prev;
       const copy = { ...prev };
@@ -104,29 +162,12 @@ export function SettingsForm({ initialSettings }: { initialSettings?: FullSettin
   };
 
   const handleReset = () => {
-    if (settings) {
-      setFormData({
-        libraryName: settings.libraryName ?? "",
-        contactEmail: settings.contactEmail ?? "",
-        loanPeriodDays: settings.loanPeriodDays ?? 14,
-        maxActiveLoans: settings.maxActiveLoans ?? 5,
-        maxRenewals: settings.maxRenewals ?? 2,
-        renewalExtensionDays: settings.renewalExtensionDays ?? 7,
-        finePerDay: settings.finePerDay ?? 5,
-        maxFinePerLoan: settings.maxFinePerLoan ?? 250,
-        fineBlockThreshold: settings.fineBlockThreshold ?? 100,
-        reservationHoldHours: settings.reservationHoldHours ?? 48,
-        maxReservationsPerMember: settings.maxReservationsPerMember ?? 3,
-        currencyCode: settings.currencyCode ?? "USD",
-        currencySymbol: settings.currencySymbol ?? "$",
-      });
-      setErrors({});
-      toast.info("Changes reset to saved values.");
-    }
+    setFormData(toFormData(settings));
+    setErrors({});
+    toast.info("Changes reset to saved values.");
   };
 
   const validate = (): boolean => {
-    if (!formData) return false;
     const errs: Record<string, string> = {};
 
     if (!formData.libraryName.trim()) {
@@ -183,7 +224,7 @@ export function SettingsForm({ initialSettings }: { initialSettings?: FullSettin
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate() || !formData) return;
+    if (!validate()) return;
 
     setIsSaving(true);
     try {
@@ -203,7 +244,7 @@ export function SettingsForm({ initialSettings }: { initialSettings?: FullSettin
         currencySymbol: formData.currencySymbol,
       });
 
-      await mutate(updated, false);
+      await onMutate(updated, { revalidate: false });
       toast.success("Settings saved successfully.", {
         description: "Library policies and rules updated immediately.",
       });
@@ -230,7 +271,7 @@ export function SettingsForm({ initialSettings }: { initialSettings?: FullSettin
           description: `Processed: ${counts.expiredReservations} expired holds, ${counts.dueSoon} due notices, ${counts.overdue} overdue notices.`,
         });
       }
-      await mutate();
+      await onMutate();
     } catch (err) {
       toast.error("Failed to run maintenance", {
         description: toErrorMessage(err),
@@ -239,29 +280,6 @@ export function SettingsForm({ initialSettings }: { initialSettings?: FullSettin
       setIsMaintaining(false);
     }
   };
-
-  if (isLoading && !formData) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24" aria-busy="true">
-        <Spinner label="Loading settings" />
-      </div>
-    );
-  }
-
-  if (error && !formData) {
-    return (
-      <Card className="rounded-xl border border-danger/30 p-4">
-        <EmptyState
-          icon={AlertTriangle}
-          title="Could not load settings"
-          description={toErrorMessage(error)}
-          action={<Button onClick={() => mutate()}>Retry</Button>}
-        />
-      </Card>
-    );
-  }
-
-  if (!formData) return null;
 
   return (
     <form onSubmit={handleSave} className="space-y-8 pb-32">

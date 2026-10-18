@@ -21,6 +21,14 @@ export const motionTokens = {
     fast: 0.15, // hover / micro-interactions
     base: 0.25, // UI (dialogs, sheets, chips)
     slow: 0.45, // page + hero entrances
+    /**
+     * One full there-and-back of the landing page's floating covers.
+     *
+     * **Far slower than any UI transition on purpose.** A cover that drifts at 0.45s reads as
+     * attention-seeking; at 7.5s it reads as a page that is breathing. `repeatType: "mirror"`
+     * rather than `y: [a, b, a]` so the motion is a true sine with no jump at the seam.
+     */
+    drift: 7.5,
   },
   distance: {
     xs: 4,
@@ -62,6 +70,26 @@ export const springs = {
   bouncy: { type: "spring", stiffness: 400, damping: 10 },
   instant: { type: "spring", stiffness: 600, damping: 35 },
   release: { type: "spring", stiffness: 200, damping: 20, restDelta: 0.001 },
+} as const satisfies Record<string, Transition>;
+
+/**
+ * The continuous, transform-only loops — currently just the landing page's floating covers.
+ *
+ * **They are the one animation that is not an interaction**, so they cannot borrow from
+ * `transitions` (which are all finite). Every value is still a token: a component that hardcoded
+ * `duration: 7.5` would be the only place in the app whose timing nobody could find later.
+ *
+ * `repeatType: "mirror"` makes the animation ping-pong between the two `y` values, which is a
+ * true sine. Writing `y: [0, -12, 0]` instead produces a visible seam where the last keyframe
+ * hands back to the first.
+ */
+export const drifts = {
+  cover: {
+    duration: motionTokens.duration.drift,
+    ease: motionTokens.easing.linear,
+    repeat: Infinity,
+    repeatType: "mirror" as const,
+  },
 } as const satisfies Record<string, Transition>;
 
 /** Opacity-only duration cap enforced whenever reduced motion is preferred. */

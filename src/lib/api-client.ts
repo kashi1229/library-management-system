@@ -22,9 +22,11 @@ import type {
   CatalogBook,
   CatalogBookDetail,
   CatalogFacets,
+  CategorySummary,
   CloudinaryImage,
   MemberRecord,
   PageMeta,
+  PublicStats,
   PublicUser,
   ReportResult,
 } from "@/types";
@@ -237,24 +239,14 @@ export const uploadsApi = {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Public shape; mirrors `CategorySummary` on the server, serialised by
- * `toCategorySummary`. Declared here as well as there for the same reason the book
- * types live in `types/index.ts` — two copies of one interface drift, and the
- * drift only surfaces as a type error somewhere unrelated.
+ * Public shape; mirrors the server's `toCategorySummary`.
+ *
+ * Declared once in `types/index.ts` and re-exported here. It used to exist in this file *and* in
+ * `services/categories.ts`, and the two drifted — only this copy narrowed `icon` to
+ * `CategoryIconName`. Two declarations of one wire shape drift, and the drift only surfaces as a
+ * type error somewhere unrelated.
  */
-export type CategorySummary = {
-  _id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  /** Always one of `CATEGORY_ICON_NAMES`. */
-  icon: CategoryIconName;
-  /** Always one of the six `CATEGORY_COLORS` keys. */
-  color: CategoryColor;
-  bookCount: number;
-  createdAt: string;
-  updatedAt: string;
-};
+export type { CategorySummary } from "@/types";
 
 export type CategoryInput = {
   name: string;
@@ -887,6 +879,18 @@ export const settingsApi = {
       method: "POST",
       signal,
     }),
+};
+
+export const publicApi = {
+  /**
+   * The landing page's live figures. Public and unauthenticated.
+   *
+   * **The fetcher takes no positional parameter** — SWR calls `fetcher(key)`, so a fetcher
+   * declared `(signal?: AbortSignal)` receives the *string cache key* and hands it straight to
+   * `fetch`. That bug shipped twice already (the staff books table in Unit 08 and the catalog in
+   * Unit 09); cancellation is wired by hand.
+   */
+  stats: () => request<PublicStats>("/public/stats"),
 };
 
 /* -------------------------------------------------------------------------- */

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getSession } from "@/lib/auth/session";
+import { getSettings } from "@/lib/services/settings";
 import { PublicNav } from "@/components/layout/public-nav";
 import { PublicFooter } from "@/components/layout/public-footer";
 
@@ -20,17 +21,31 @@ export const metadata: Metadata = {
  * whether the navbar offers "Sign in" or initials for the account menu; it is never
  * authorisation, and these routes are public either way. Anything that genuinely needs
  * a live record (status, avatar, membership id) goes through `requireSession()`.
+ *
+ * `getSettings()` is also a single cached read (30s, `services/settings.ts`), and it is
+ * what puts the **live** library name in the navbar and footer — the settings screen has
+ * to be able to rename the library and have it appear here, which is spec 19's own
+ * verification item.
  */
 export default async function PublicLayout({ children }: { children: React.ReactNode }) {
-  const session = await getSession().catch(() => null);
+  const [session, settings] = await Promise.all([
+    getSession().catch(() => null),
+    getSettings().catch(() => null),
+  ]);
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <PublicNav user={session ? { name: session.name, role: session.role } : null} />
+      <PublicNav
+        user={session ? { name: session.name, role: session.role } : null}
+        libraryName={settings?.libraryName}
+      />
       <main id="main" className="flex-1">
         {children}
       </main>
-      <PublicFooter />
+      <PublicFooter
+        libraryName={settings?.libraryName}
+        contactEmail={settings?.contactEmail}
+      />
     </div>
   );
 }

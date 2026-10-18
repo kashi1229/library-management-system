@@ -58,6 +58,14 @@ export function BookCover({
           fill
           sizes={sizes}
           priority={priority}
+          /*
+           * Images are natively draggable, and the browser will happily start dragging the
+           * image file — which fires `pointercancel`, so any pointer-based interaction the
+           * image sits inside (the landing page's draggable shelf) dies at the first pixel.
+           * A cover inside a link should never be draggable anyway: dragging it drops the image
+           * URL onto something instead of doing the one thing the cover looks like it does.
+           */
+          draggable={false}
           className="object-cover"
         />
       ) : (

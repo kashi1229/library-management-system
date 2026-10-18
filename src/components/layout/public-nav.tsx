@@ -14,11 +14,20 @@ import { ROUTES, type Role } from "@/lib/constants";
 
 /** Nav entries a signed-in member still gets on a public page. */
 const LINKS = [
-  { href: ROUTES.catalog, label: "Catalog" },
+  { href: ROUTES.catalog, label: "Catalog", signedInOnly: false },
   { href: ROUTES.member.wishlist, label: "Wishlist", signedInOnly: true },
   { href: ROUTES.member.loans, label: "My Loans", signedInOnly: true },
   { href: ROUTES.member.profile, label: "Profile", signedInOnly: true },
 ] as const;
+
+/**
+ * How far the page must scroll before the bar is allowed to hide at all.
+ *
+ * **Without a floor, the bar flickers.** A reader who nudges the page by three pixels to look at
+ * something just under the header would make it vanish and reappear, which reads as a glitch
+ * rather than as intent.
+ */
+const HIDE_FLOOR_PX = 160;
 
 /**
  * Public navbar: logo left, links centre-left, theme toggle and account right.
@@ -28,31 +37,59 @@ const LINKS = [
  * once the page has scrolled — a permanently visible rule reads heavier than the
  * editorial style wants.
  *
+ * **It hides on the way down and returns on the way up** (spec 20). The transform is
+ * applied to the `<header>` itself rather than to its inner row, so the 64px of
+ * space it vacates is reclaimed too — sliding the contents up inside a `sticky` box
+ * would leave a blank strip where the bar was.
+ *
+ * **Two cases override the hide, because a navigation you cannot reach is worse than
+ * one you cannot tidy away:** while the mobile panel is open, and while focus is inside
+ * the bar. Both are read from the DOM in the scroll handler rather than tracked as
+ * state, so they cannot fall out of step with what is actually on screen.
+ *
  * Links are underlined on the active route so the current page is legible without
  * relying on colour alone.
  */
 export function PublicNav({
   user,
+  libraryName = "Athenaeum",
 }: {
   /** Minimal identity, or `null` for a visitor. */
   user: { name: string; role: Role } | null;
+  /** Live value from the Settings singleton — the wordmark is not hard-coded. */
+  libraryName?: string;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = React.useState(false);
   const [scrolled, setScrolled] = React.useState(false);
+  const [hidden, setHidden] = React.useState(false);
+  const headerRef = React.useRef<HTMLElement>(null);
 
   const visible = React.useMemo(
-    () => LINKS.filter((link) => !("signedInOnly" in link) || Boolean(user)),
+    () => LINKS.filter((link) => !link.signedInOnly || Boolean(user)),
     [user],
   );
 
   // The header is 64px, and the page scrolls under it.
   React.useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
+    let lastY = window.scrollY;
+
+    const onScroll = () => {
+      const y = window.scrollY;
+      setScrolled(y > 8);
+
+      const focusInside = headerRef.current?.contains(document.activeElement) ?? false;
+      if (!open && !focusInside) {
+        setHidden(y > lastY && y > HIDE_FLOOR_PX);
+      }
+
+      lastY = y;
+    };
+
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [open]);
 
   /** Close on navigate. Done in the click, not in an effect on `pathname` —
    *  `setState` inside an effect cascades a render, and React's compiler rejects it. */
@@ -60,9 +97,11 @@ export function PublicNav({
 
   return (
     <header
+      ref={headerRef}
       className={cn(
-        "sticky top-0 z-40 border-b bg-background/80 backdrop-blur-sm transition-[border-color]",
+        "sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md transition-[border-color,transform]",
         scrolled ? "border-border" : "border-transparent",
+        hidden && !open && "-translate-y-full",
       )}
     >
       <div className="container-page flex h-16 items-center gap-4">
@@ -70,8 +109,8 @@ export function PublicNav({
           href={ROUTES.catalog}
           className="shrink-0 rounded-md focus-visible:ring-[3px] focus-visible:ring-ring/45 focus-visible:outline-none"
         >
-          <Logo name="Athenaeum" />
-          <span className="sr-only">Athenaeum catalog home</span>
+          <Logo name={libraryName} />
+          <span className="sr-only">{libraryName} catalog home</span>
         </Link>
 
         <nav aria-label="Main" className="hidden min-w-0 items-center gap-1 md:flex">

@@ -1,12 +1,10 @@
 "use client";
 
-import * as React from "react";
-import { animate, useInView } from "motion/react";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { springs } from "@/lib/motion";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { usePrefersReducedMotion } from "@/hooks/use-motion-variants";
+import { CountUp } from "@/components/common/count-up";
 
 type StatTone = "default" | "accent" | "danger" | "success" | "warning" | "info";
 
@@ -28,7 +26,7 @@ type StatCardProps = {
   icon?: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   tone?: StatTone;
   /** Secondary line under the number, e.g. "3 due today". */
-  hint?: React.ReactNode;
+  hint?: ReactNode;
   className?: string;
 };
 
@@ -91,48 +89,3 @@ const TONE_STYLES = {
   warning: { value: "text-warning-ink", icon: "bg-warning-soft text-warning-ink" },
   info: { value: "text-info-ink", icon: "bg-info-soft text-info-ink" },
 } as const;
-
-/**
- * Counts 0 → `value` once on entry into the viewport.
- *
- * State is initialised to `value` so the server render and the first client
- * frame agree (no hydration mismatch, no zero-flash). Until the animation runs,
- * the rendered number always mirrors the `value` prop, so a data refresh can
- * never leave a stale count on screen.
- */
-function CountUp({
-  value,
-  format,
-  className,
-}: {
-  value: number;
-  format: (value: number) => string;
-  className?: string;
-}) {
-  const ref = React.useRef<HTMLSpanElement>(null);
-  const inView = useInView(ref, { once: true, margin: "0px 0px -10% 0px" });
-  const reduced = usePrefersReducedMotion();
-  const [animated, setAnimated] = React.useState(value);
-
-  const running = inView && !reduced;
-
-  React.useEffect(() => {
-    if (!running) return;
-
-    const controls = animate(0, value, {
-      ...springs.gentle,
-      damping: 26,
-      // setState fires from the animation frame callback, not the effect body.
-      onUpdate: (latest) => setAnimated(Math.round(latest)),
-      onComplete: () => setAnimated(value),
-    });
-
-    return () => controls.stop();
-  }, [running, value]);
-
-  return (
-    <span ref={ref} className={className}>
-      {format(running ? animated : value)}
-    </span>
-  );
-}

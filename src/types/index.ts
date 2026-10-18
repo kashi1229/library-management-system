@@ -1,4 +1,5 @@
 import type { Types } from "mongoose";
+import type { CategoryIconName } from "@/lib/validators/category";
 import type {
   BookStatus,
   CategoryColor,
@@ -981,4 +982,60 @@ export type MemberRecord = PublicUser & {
   loans: MemberLoan[];
   fines: MemberFine[];
   reservations: MemberReservation[];
+};
+
+/* -------------------------------------------------------------------------- */
+/* Landing page (spec 20)                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A category as the wire carries it — produced by `toCategorySummary`.
+ *
+ * **Declared once, here, rather than in both `services/categories.ts` and `api-client.ts`.**
+ * The two copies had already drifted: the client's narrowed `icon` to `CategoryIconName` while
+ * the server's stayed `string`, so a value the service was entitled to produce did not type-check
+ * on the other side. It lives in `types/` because that module is client-safe, and the landing
+ * page (Unit 20) has to name it from `PublicStats` — which a `server-only` import would break,
+ * the same class of bug as Unit 10's validator pulling mongoose into the browser.
+ */
+export type CategorySummary = {
+  _id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  /** Always one of `CATEGORY_ICON_NAMES`. */
+  icon: CategoryIconName;
+  /** Always one of the six `CATEGORY_COLORS` keys. */
+  color: CategoryColor;
+  bookCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Everything the marketing landing page shows, in one read.
+ *
+ * **Serialised, not lean documents**, for the same reason `CategorySummary` is: the landing
+ * page is a Server Component that hands `newArrivals` straight to a Client Component, and
+ * React refuses to cross the RSC boundary with anything carrying a `toJSON`.
+ */
+export type PublicStats = {
+  /** Active titles in the catalog. */
+  books: number;
+  /** Total copies owned across those titles. */
+  copies: number;
+  /** Members whose account is `active` — the ones who can actually borrow. */
+  members: number;
+  /**
+   * Loans issued in the last 30 days, not the lifetime total.
+   *
+   * A lifetime figure only ever goes up, so on a library that has been running for years it
+   * says nothing about whether the place is alive. A thirty-day window is the number that
+   * moves, and the band labels it "this month" so the window is never a surprise.
+   */
+  loansThisMonth: number;
+  /** The eight newest active books, newest first. */
+  newArrivals: CatalogBook[];
+  /** Every category with its active-book count, for the showcase. */
+  categories: CategorySummary[];
 };

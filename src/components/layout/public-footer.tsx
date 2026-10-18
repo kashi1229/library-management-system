@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { Mail } from "lucide-react";
 import { Logo } from "@/components/common/logo";
 import { ROUTES } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 
 const COLUMNS = [
   {
@@ -36,17 +38,44 @@ const COLUMNS = [
  *
  * The "Browse" column links into catalog filters rather than dead ends, so a footer
  * link is a real shortcut instead of a second copy of the nav bar.
+ *
+ * **The library name and contact email come from the Settings singleton**, because spec 19's
+ * whole point is that an admin renaming the library sees it everywhere — including the footer,
+ * which is the one place on a public page that is unambiguously "the library speaking". They
+ * both fall back to defaults rather than rendering an empty slot: a footer with a blank line
+ * where the contact should be is worse than a generic one.
  */
-export function PublicFooter() {
+
+export function PublicFooter({
+  libraryName = "Athenaeum",
+  contactEmail = null,
+  className,
+}: {
+  libraryName?: string;
+  /** `null` when the library has not published one, in which case no row is rendered. */
+  contactEmail?: string | null;
+  className?: string;
+}) {
   return (
-    <footer className="mt-16 border-t border-border bg-muted/30">
+    <footer className={cn("mt-16 border-t border-border bg-muted/30", className)}>
       <div className="container-page grid gap-10 py-12 sm:grid-cols-2 lg:grid-cols-4">
         <div className="space-y-3">
-          <Logo name="Athenaeum" />
+          <Logo name={libraryName} />
           <p className="max-w-xs text-small text-pretty text-muted-foreground">
             A quiet, careful catalog for the university library. Borrow, reserve and keep
             track of what you have read.
           </p>
+          {contactEmail ? (
+            <p className="flex items-center gap-2 text-small text-muted-foreground">
+              <Mail aria-hidden="true" strokeWidth={1.75} className="size-4 shrink-0" />
+              <a
+                href={`mailto:${contactEmail}`}
+                className="rounded-sm underline underline-offset-4 hover:text-foreground"
+              >
+                {contactEmail}
+              </a>
+            </p>
+          ) : null}
         </div>
 
         {COLUMNS.map((column) => (
@@ -72,7 +101,7 @@ export function PublicFooter() {
 
       <div className="border-t border-border">
         <div className="container-page flex flex-col gap-2 py-5 text-caption text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <p>Athenaeum Library Management System</p>
+          <p>{libraryName} Library Management System</p>
           <p>Cataloguing · Circulation · Reservations · Reports</p>
         </div>
       </div>

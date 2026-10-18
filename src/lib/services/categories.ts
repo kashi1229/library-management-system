@@ -7,7 +7,7 @@ import { slugify } from "@/lib/validators/category";
 import type { CategoryIconName, CreateCategoryInput, UpdateCategoryInput } from "@/lib/validators/category";
 import { CATEGORY_ICON_NAMES } from "@/lib/validators/category";
 import type { Actor } from "@/types";
-import type { CategoryDoc } from "@/types";
+import type { CategoryDoc, CategorySummary } from "@/types";
 import {
   CATEGORY_COLORS,
   DEFAULT_CATEGORY_COLOR,
@@ -28,23 +28,18 @@ export type CategoryWithCount = CategoryDoc & { bookCount: number };
 /**
  * The client-facing shape: ids and dates already serialised to strings.
  *
- * `code-standards.md` requires serialisation at the boundary. Relying on
- * `JSON.stringify` coercing an ObjectId to a string makes the wire format agree
- * with the declared type by accident, and leaves Server Components (Unit 08's book
- * form) unable to hand a category to a client component at all. One explicit
- * serialiser, used by both the route and the page, makes it correct by design.
+ * **Declared in `types/index.ts`, once.** `code-standards.md` requires serialisation at the
+ * boundary. Relying on `JSON.stringify` coercing an ObjectId to a string makes the wire format
+ * agree with the declared type by accident, and leaves Server Components (Unit 08's book form)
+ * unable to hand a category to a client component at all. One explicit serialiser, used by both
+ * the route and the page, makes it correct by design.
+ *
+ * Re-exported rather than redeclared: it used to be declared here *and* in `api-client.ts`, and
+ * the two copies drifted (only the client's narrowed `icon` to `CategoryIconName`). Anything
+ * naming this from a Client Component would have had to import the `server-only` copy, so the
+ * declaration moved to the client-safe `types/` module.
  */
-export type CategorySummary = {
-  _id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  icon: string;
-  color: CategoryColor;
-  bookCount: number;
-  createdAt: string;
-  updatedAt: string;
-};
+export type { CategorySummary } from "@/types";
 
 export function toCategorySummary(category: CategoryWithCount): CategorySummary {
   return {

@@ -27,6 +27,19 @@ Update this file after every meaningful implementation change.
 
 ## Completed
 
+### Unit 20 — Landing Page Rebuild ✅ · `feat/20-landing-rebuild`
+**Status: complete.** 100% rebuilt from scratch into an industrial-grade, minimal, artistic, responsive experience:
+- **Atmosphere & Architectural Visuals (`landing-atmosphere.tsx`)**: Fine architectural drafting grid, ambient radial parchment blooms, and classical library arch watermark line art.
+- **Hero & Live Engine Search (`hero.tsx`, `hero-search.tsx`)**: Fraunces display headline with staggered word reveal, operational campus status beacon, instant combobox search with cover thumbnails, popular tags, and ratings.
+- **Interactive 3D Physical Book Cluster (`cover-stack.tsx`)**: Mouse tilt tracking parallax, realistic spine lighting, harmonic sine float physics via `motion/react`, and instant catalog routing.
+- **Milestone Showcase (`stats-band.tsx`)**: Real-time authenticated database metrics, spring `CountUp` with `tabular-nums`, concentric radius cards, and top accent highlight lines.
+- **Curated Disciplines Explorer (`category-showcase.tsx`)**: Responsive academic shelf cards with token-based icon tiles, live book counts, and ambient hover effects.
+- **Reading Room Shelf (`new-arrivals.tsx`)**: Horizontal carousel with native momentum scroll snap, drag gesture handling, keyboard arrow keys, edge fade masks, and rich metadata cards.
+- **Circulation Lifecycle (`how-it-works.tsx`)**: 3-stage interactive lifecycle with tab switcher, animated SVG connecting line, and live UI preview mocks.
+- **Architecture Bento Grid (`platform-highlights.tsx`)**: 4-pillar showcase of transactional integrity, design system compliance, signed asset pipelines, and enterprise CSV reporting.
+- **Literary Quote & Trust CTA (`library-quote.tsx`, `cta-band.tsx`, `back-to-top.tsx`)**: Academic quotation, member benefit checklist, book spine silhouettes, and smooth scroll-to-top button.
+- `npm run lint` and `npm run build` pass with zero errors and zero warnings.
+
 ### Unit 18 — Reports, CSV & Audit Log ✅ · `feat/18-reports-audit`
 **Status: complete.** 100/100 API checks against the live database; `tsc`, `eslint` and
 `next build` clean; both pages render without an error boundary.

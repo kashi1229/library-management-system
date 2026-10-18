@@ -1,0 +1,67 @@
+# TASK: Redesign the Athenaeum landing page to be modern, artistic, and production-grade
+
+You are a senior product designer + front-end engineer. Redesign the ENTIRE landing page (`/`) of "Athenaeum", a campus Library Management System built with Next.js (App Router), MongoDB, Cloudinary and lucide-react. Keep all existing content, routes and data wiring, but overhaul the visual design, layout, motion and interactions. Before changing anything, inspect the current landing page components, the Tailwind config / global CSS, and the existing API routes, then reuse what exists.
+
+## 1. Design direction
+- Theme: "Modern editorial library": warm parchment, deep forest green, ink charcoal, a terracotta accent. Quiet, literary, premium. Think Linear/Stripe polish meets a rare-books reading room.
+- Define design tokens as CSS variables in globals.css (and map them in tailwind.config): parchment background, surface, border, ink text, muted text, forest primary, terracotta accent, plus full dark-mode ("charcoal reading room") equivalents. Contrast must meet WCAG 2.2 AA in both themes.
+- Typography: pair an elegant serif display font (e.g. Fraunces or Playfair Display) with a clean sans (Inter or Geist) via `next/font`. Use a fluid type scale with `clamp()`. Large, confident hero headline with tight tracking; small uppercase eyebrow labels with wide letter-spacing.
+- Spacing: generous whitespace, 8px grid, max content width ~1200px, consistent section padding (96–128px desktop, 64px mobile).
+
+## 2. Background illustrations and artwork
+Create original inline SVG artwork (no stock images, no external requests):
+- Hero: a large, softly drawn line-art illustration (arched library windows, stacked books, a reading lamp, floating pages) in low-opacity strokes behind the headline, with a subtle gradient mesh / grain texture overlay.
+- Slow parallax on illustration layers (different depths move at different speeds on scroll), plus a few floating book/page elements with gentle continuous float animation.
+- Section backgrounds: alternating parchment tones, thin hairline book-spine patterns, faint dotted grids, soft radial glows. Add curved SVG dividers between sections instead of hard edges.
+- Dark CTA section: a skyline of book spines of varying heights that gently rise and fall (staggered animation), with a subtle vignette.
+- All decorative art is `aria-hidden`, pointer-events none, and works in light and dark themes (use `currentColor` / CSS variables).
+
+## 3. Sections to build (in order)
+1. **Sticky navbar**: transparent at the top, becomes frosted glass (backdrop blur, hairline border, soft shadow) after scrolling. Logo, links (Catalog, Features, How it works), theme toggle with animated sun/moon morph, Sign in, and a primary "Join" button. Active-section highlight using IntersectionObserver. Mobile: animated hamburger opening a full-height slide-in drawer with focus trap, Esc to close, and scroll lock.
+2. **Hero**: eyebrow pill ("Campus active"), animated headline (word-by-word reveal), subcopy, and a large glassmorphic search bar with working autocomplete (debounced fetch to the real catalog search API, keyboard navigation with arrow keys/Enter/Esc, loading skeleton, empty state). Popular-search chips that fill and submit the search. Two CTAs ("Browse the catalog", "Create member account") with magnetic hover and arrow-slide animation. Row of three trust badges with icons (real-time availability, FIFO hold priority, 1-click renewals).
+3. **Live metrics**: four stat cards (titles, members, monthly circulation, hold guarantee) with animated count-up when scrolled into view, fed by a real API endpoint (aggregation from MongoDB). Show shimmer skeletons while loading and a graceful fallback if the request fails. Never show a hard-coded "0". Add small sparkline or progress-ring accents.
+4. **How borrowing works**: a 3-step interactive stepper (Discover & Locate, Borrow & Smart Queue, Renew & Review). A connecting line animates/draws as the user scrolls. Clicking or hovering a step switches a large preview panel with a smooth cross-fade/slide. Each panel shows a polished mini UI mockup built from real components (e.g. a catalog result card with availability badge, a hold-queue position tracker, a renewal confirmation). Keyboard accessible (tabs pattern with proper ARIA roles).
+5. **Feature cards (system architecture)**: bento-grid layout with four to six cards (Transactional integrity, Editorial/dark theme, Cloudinary CDN, Live analytics & CSV export, etc.). Each card: gradient icon tile, badge, title, description, subtle illustration, and a footer link. Hover: lift with soft shadow, animated gradient border, a cursor-following spotlight glow, and icon micro-animation.
+6. **Featured books carousel**: pull real books from the database (cover from Cloudinary with `next/image`, title, author, availability badge, rating). Smooth drag/scroll-snap carousel with arrow buttons, dots, and hover tilt on covers. Fallback to a typographic generated cover when no image exists.
+7. **Testimonial / quote**: large serif pull quote with decorative quotation glyph, fade-up reveal, and faint illustration behind it.
+8. **Final CTA**: dark forest section with benefits list (icons), primary + secondary buttons with hover glow, and the animated book-spine skyline.
+9. **Footer**: multi-column links, newsletter or contact row only if a working handler exists, theme toggle, social icons, and a back-to-top button that appears after scrolling.
+
+## 4. Motion and interaction system
+- Use Framer Motion (or Motion One) for animation. Create reusable primitives: `<Reveal>` (fade-up on view, once), `<Stagger>`, `<CountUp>`, `<Magnetic>`, `<SpotlightCard>`, `<ParallaxLayer>`.
+- Smooth scrolling: add Lenis (or CSS `scroll-behavior: smooth` as a fallback) with anchor links that offset for the sticky navbar. Add a thin scroll-progress bar under the navbar.
+- Hover states on EVERYTHING interactive: buttons (lift, glow, arrow shift), cards (elevate, border glow), links (animated underline), chips, icons. Add visible, styled `:focus-visible` rings.
+- Custom, subtle page-load sequence (staggered hero reveal, under 1.2s total). Easing: cubic-bezier(0.22, 1, 0.36, 1); durations 200–600ms.
+- Respect `prefers-reduced-motion`: disable parallax, float and count-up, and use simple fades.
+- Never cause layout shift; reserve space for images, fonts and dynamic content.
+
+## 5. Icons and cards
+- Use lucide-react consistently: one stroke width (1.5), consistent sizes, placed in rounded gradient tiles. No emoji. No mixed icon sets.
+- Cards: 16–20px radius, hairline border, layered soft shadows, optional glass effect, consistent padding, and a clear hierarchy (eyebrow, title, body, action).
+
+## 6. Everything must actually work (no dead UI)
+- Every button and link goes to a real route or performs a real action: Browse catalog → `/catalog`, Create account → `/register`, Sign in → `/login`, footer links → existing pages (create simple placeholder pages only if missing, never `#`).
+- If the user is already logged in, the navbar and CTAs adapt (e.g. "Dashboard", avatar menu, no "Join").
+- Search submits to the catalog results page with the query in the URL.
+- Stats and featured books come from real API routes with proper error handling, loading and empty states.
+- Theme toggle persists in localStorage and avoids flash of wrong theme (inline script / `next-themes`).
+- All forms and inputs have labels, validation and error messages.
+
+## 7. Responsive, accessible, fast
+- Mobile-first; verify at 360, 768, 1024, 1440 and 1920px. No horizontal scroll. Touch targets at least 44px.
+- Semantic HTML (header, nav, main, section, footer), a skip-to-content link, proper heading order, alt text, ARIA where needed, full keyboard navigation.
+- Performance: `next/image` with sizes and priority on the hero, lazy-load below-the-fold sections via dynamic imports, no layout shift, target Lighthouse 90+ on all four categories. Keep animation on transform/opacity only.
+- Add SEO: metadata, Open Graph tags, and a favicon.
+
+## 8. Code quality
+- Split the page into small components under `components/landing/` (Navbar, Hero, SearchBar, StatsGrid, HowItWorks, FeatureBento, FeaturedBooks, Quote, FinalCta, Footer) plus `components/motion/` for the primitives.
+- Keep client components minimal; fetch data in server components or route handlers where possible.
+- No hard-coded colors outside the tokens, no unused dependencies, no console errors or warnings, and no hydration mismatches.
+
+## 9. Deliverables and process
+1. Briefly list the files you will create or change, then implement.
+2. Install only the necessary packages (framer-motion, lenis, next-themes if missing).
+3. Run the dev server, build, and lint; fix every error.
+4. At the end, give a short checklist confirming each section works, plus a summary of anything that needed a placeholder.
+
+Do not remove existing functionality. Prioritize polish, coherence and reliability over quantity of effects: every animation should have a purpose.
