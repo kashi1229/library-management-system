@@ -869,7 +869,11 @@ export const settingsApi = {
   update: (data: UpdateSettingsPayload, signal?: AbortSignal) =>
     request<FullSettings>("/settings", {
       method: "PATCH",
-      body: JSON.stringify(data),
+      // The **object**, not a string: `send` already runs `JSON.stringify` on the
+      // body. Serialising here as well sent `JSON.stringify(payload)`, so the route
+      // parsed a JSON *string* and `updateSettingsSchema` answered 422
+      // `Invalid input: expected object, received string` on every save.
+      body: data,
       signal,
     }),
 

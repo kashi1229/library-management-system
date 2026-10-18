@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import useSWR from "swr";
+import { z } from "zod";
 import { toast } from "sonner";
 import {
   Building2,
@@ -21,7 +22,13 @@ import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/field";
 import { Spinner } from "@/components/common/spinner";
 import { EmptyState } from "@/components/common/empty-state";
-import { settingsApi, toErrorMessage, type FullSettings } from "@/lib/api-client";
+import {
+  ApiRequestError,
+  settingsApi,
+  toErrorMessage,
+  type FullSettings,
+} from "@/lib/api-client";
+import { updateSettingsSchema, type UpdateSettingsInput } from "@/lib/validators/settings";
 import { formatDate } from "@/lib/utils";
 
 type SettingsFormData = {
@@ -39,6 +46,60 @@ type SettingsFormData = {
   currencyCode: string;
   currencySymbol: string;
 };
+
+/**
+ * The exact body the API receives.
+ *
+ * Built in one place because it used to be written twice — once inside `validate()`
+ * and once inside `handleSave()` — and the two could disagree about what was being
+ * checked against what was being sent. `Number(...)` matters here: the inputs are
+ * `type="number"`, but `parseInt("")` is `NaN`, and the schema needs a real number
+ * or a `0` the admin can see and correct.
+ */
+function toPayload(formData: SettingsFormData): UpdateSettingsInput {
+  return {
+    libraryName: formData.libraryName,
+    contactEmail: formData.contactEmail.trim() || null,
+    loanPeriodDays: Number(formData.loanPeriodDays),
+    maxActiveLoans: Number(formData.maxActiveLoans),
+    maxRenewals: Number(formData.maxRenewals),
+    renewalExtensionDays: Number(formData.renewalExtensionDays),
+    finePerDay: Number(formData.finePerDay),
+    maxFinePerLoan: Number(formData.maxFinePerLoan),
+    fineBlockThreshold: Number(formData.fineBlockThreshold),
+    reservationHoldHours: Number(formData.reservationHoldHours),
+    maxReservationsPerMember: Number(formData.maxReservationsPerMember),
+    currencyCode: formData.currencyCode,
+    currencySymbol: formData.currencySymbol,
+  };
+}
+
+/**
+ * Client-side validation by **running the server's own schema**.
+ *
+ * This form used to hand-roll twelve range checks beside the schema in
+ * `validators/settings.ts`, and two rules never made the copy: `contactEmail` had
+ * none at all, and `libraryName`'s 80-character ceiling was missing. An admin who
+ * typed `athenaeum.edu` therefore got a 422 with the generic "Please check the
+ * highlighted fields." and **no field highlighted** — because `handleSave` threw the
+ * server's field errors away instead of mapping them onto the inputs, which every
+ * other form in this app already does.
+ *
+ * One schema, run in both places, is what makes that class of drift impossible.
+ */
+function validatePayload(payload: UpdateSettingsInput): Record<string, string> {
+  const result = updateSettingsSchema.safeParse(payload);
+  if (result.success) return {};
+
+  const { fieldErrors } = z.flattenError(result.error);
+  const errors: Record<string, string> = {};
+  // First message per field: the schema stacks `.min` and `.regex` messages on the
+  // same key, and one sentence per input is all a `Field` can show.
+  for (const [name, messages] of Object.entries(fieldErrors)) {
+    if (messages?.[0]) errors[name] = messages[0];
+  }
+  return errors;
+}
 
 /**
  * Seed the editable form from the saved record.
@@ -167,91 +228,34 @@ function SettingsEditor({
     toast.info("Changes reset to saved values.");
   };
 
-  const validate = (): boolean => {
-    const errs: Record<string, string> = {};
-
-    if (!formData.libraryName.trim()) {
-      errs.libraryName = "Library name is required.";
-    }
-
-    if (formData.loanPeriodDays < 1 || formData.loanPeriodDays > 90) {
-      errs.loanPeriodDays = "Loan period must be between 1 and 90 days.";
-    }
-
-    if (formData.maxActiveLoans < 1 || formData.maxActiveLoans > 20) {
-      errs.maxActiveLoans = "Max active loans must be between 1 and 20.";
-    }
-
-    if (formData.maxRenewals < 0 || formData.maxRenewals > 10) {
-      errs.maxRenewals = "Max renewals must be between 0 and 10.";
-    }
-
-    if (formData.renewalExtensionDays < 1 || formData.renewalExtensionDays > 30) {
-      errs.renewalExtensionDays = "Renewal extension must be between 1 and 30 days.";
-    }
-
-    if (formData.finePerDay < 0 || formData.finePerDay > 1000) {
-      errs.finePerDay = "Fine per day must be between 0 and 1,000.";
-    }
-
-    if (formData.maxFinePerLoan < formData.finePerDay) {
-      errs.maxFinePerLoan = "Max fine per loan must be at least equal to daily fine rate.";
-    }
-
-    if (formData.fineBlockThreshold < 0) {
-      errs.fineBlockThreshold = "Fine block threshold cannot be negative.";
-    }
-
-    if (formData.reservationHoldHours < 1 || formData.reservationHoldHours > 240) {
-      errs.reservationHoldHours = "Hold window must be between 1 and 240 hours.";
-    }
-
-    if (formData.maxReservationsPerMember < 1 || formData.maxReservationsPerMember > 10) {
-      errs.maxReservationsPerMember = "Max reservations must be between 1 and 10.";
-    }
-
-    if (!/^[A-Z]{3}$/.test(formData.currencyCode)) {
-      errs.currencyCode = "Currency code must be a 3-letter code (e.g. USD).";
-    }
-
-    if (!formData.currencySymbol.trim() || formData.currencySymbol.length > 4) {
-      errs.currencySymbol = "Currency symbol must be 1 to 4 characters.";
-    }
-
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+
+    const payload = toPayload(formData);
+    const invalid = validatePayload(payload);
+    if (Object.keys(invalid).length > 0) {
+      setErrors(invalid);
+      return;
+    }
 
     setIsSaving(true);
+    setErrors({});
     try {
-      const updated = await settingsApi.update({
-        libraryName: formData.libraryName,
-        contactEmail: formData.contactEmail.trim() || null,
-        loanPeriodDays: Number(formData.loanPeriodDays),
-        maxActiveLoans: Number(formData.maxActiveLoans),
-        maxRenewals: Number(formData.maxRenewals),
-        renewalExtensionDays: Number(formData.renewalExtensionDays),
-        finePerDay: Number(formData.finePerDay),
-        maxFinePerLoan: Number(formData.maxFinePerLoan),
-        fineBlockThreshold: Number(formData.fineBlockThreshold),
-        reservationHoldHours: Number(formData.reservationHoldHours),
-        maxReservationsPerMember: Number(formData.maxReservationsPerMember),
-        currencyCode: formData.currencyCode,
-        currencySymbol: formData.currencySymbol,
-      });
+      const updated = await settingsApi.update(payload);
 
       await onMutate(updated, { revalidate: false });
       toast.success("Settings saved successfully.", {
         description: "Library policies and rules updated immediately.",
       });
     } catch (err) {
-      toast.error("Failed to save settings.", {
-        description: toErrorMessage(err),
-      });
+      // The server is the authority on these rules, so its per-field messages win
+      // and land on the inputs rather than in a toast nobody can act on.
+      if (err instanceof ApiRequestError && err.fields && Object.keys(err.fields).length > 0) {
+        setErrors(err.fields);
+        toast.error("Please check the highlighted fields.");
+      } else {
+        toast.error("Failed to save settings.", { description: toErrorMessage(err) });
+      }
     } finally {
       setIsSaving(false);
     }
@@ -281,8 +285,15 @@ function SettingsEditor({
     }
   };
 
+  /*
+   * `noValidate`, like every other form in the app. Without it the browser's own
+   * constraint bubbles (`type="email"`, `min`/`max`, `maxLength`) intercept the
+   * submit event first, so `handleSave` never runs: the admin gets a transient
+   * native tooltip instead of this app's inline, screen-reader-announced message,
+   * and a genuine validation failure can look like the button simply did nothing.
+   */
   return (
-    <form onSubmit={handleSave} className="space-y-8 pb-32">
+    <form onSubmit={handleSave} noValidate className="space-y-8 pb-32">
       {/* 1. Identity & Contact */}
       <Card className="rounded-xl border border-border/80 bg-surface shadow-xs">
         <CardHeader className="border-b border-border/60 pb-4">

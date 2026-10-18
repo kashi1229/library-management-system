@@ -1,1 +1,22 @@
-:3000/api/settings:1  Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)
+Build Error
+
+
+
+Expected ',', got 'ident'
+./src/components/features/settings/settings-form.tsx (296:11)
+
+Error: Expected ',', got 'ident'
+  294 |       and a genuine validation failure can look like the button simply did nothing.
+  295 |     */}
+> 296 |     <form onSubmit={handleSave} noValidate className="space-y-8 pb-32">
+      |           ^^^^^^^^
+  297 |       {/* 1. Identity & Contact */}
+  298 |       <Card className="rounded-xl border border-border/80 bg-surface shadow-xs">
+  299 |         <CardHeader className="border-b border-border/60 pb-4">
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./src/components/features/settings/settings-form.tsx
+    ./src/app/staff/settings/page.tsx
