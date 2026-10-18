@@ -335,8 +335,10 @@ type SignedParams = {
  * and a determinate bar is part of the design.
  *
  * Every field covered by the signature must be echoed back with the **same name
- * and value**, or Cloudinary rejects the upload with `Invalid Signature`. That
- * includes `max_file_size` — omitting it is the easiest way to break this.
+ * and value**, or Cloudinary rejects the upload with `Invalid Signature`. That is
+ * `timestamp`, `folder` and `allowed_formats`. `max_file_size` is sent as well, but
+ * only to state the cap — Cloudinary leaves it out of the string it signs, so
+ * signing it server-side is what made every upload fail.
  */
 function uploadToCloudinary(
   file: File,
@@ -350,7 +352,7 @@ function uploadToCloudinary(
     form.append("timestamp", String(signed.timestamp));
     form.append("signature", signed.signature);
     form.append("folder", signed.folder);
-    // Signed constraints — must match the server's signing payload exactly.
+    // `allowed_formats` is covered by the signature; `max_file_size` is not.
     form.append("allowed_formats", signed.allowedFormats);
     form.append("max_file_size", String(signed.maxFileSizeBytes));
 

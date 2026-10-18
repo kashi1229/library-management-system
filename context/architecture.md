@@ -84,9 +84,14 @@ type agree **by construction** rather than by relying on `JSON.stringify` to coe
 2. `POST /api/uploads/sign` returns `{ signature, timestamp, apiKey, cloudName, folder, allowedFormats,
    maxFileSizeBytes }`. `folder` is a zod enum whitelist; `covers` additionally requires a staff role.
 3. The client POSTs the file straight to Cloudinary with `XMLHttpRequest` (the only browser API that
-   reports upload progress), echoing **every signed field with the same name and value** — including
-   `max_file_size`. Omitting a signed field makes Cloudinary reject the upload.
-4. `max_file_size` and `allowed_formats` are inside the signature, so the client **cannot widen them**.
+   reports upload progress), echoing **every signed field with the same name and value**. Omitting a
+   signed field makes Cloudinary reject the upload.
+4. The signature covers `timestamp`, `folder` and `allowed_formats` — **never `max_file_size`**.
+   Cloudinary excludes `max_file_size` from the string it signs (verified: identical requests yield the
+   same `String to sign` with and without it), so signing it makes every upload fail with
+   `Invalid Signature`. `folder` and `allowed_formats` are therefore tamper-proof; the size cap is not —
+   a signed direct upload ignores `max_file_size` (verified: 1.9MB accepted under a 1KB cap), so the
+   cap rests on `validateImageFile` plus account storage limits until a signed **upload preset** pins it.
 5. `PATCH /api/profile` **derives the delivery URL from the `publicId` on the server** and ignores any
    client-supplied `url`. The avatar URL is rendered to other users (staff see it at the desk), so a
    client-controlled URL would be a stored cross-user content/tracking primitive.

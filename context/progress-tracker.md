@@ -25,6 +25,39 @@ Update this file after every meaningful implementation change.
   stylesheet and the `print:` utilities are written and correct by inspection; only a
   print-media capture would close it.
 
+## Hotfix — Cloudinary signed uploads returned 401 `Invalid Signature`
+
+**Reported by the developer as:** every image upload failing with
+`Invalid Signature f0f55905…. String to sign - 'allowed_formats=jpg,jpeg,png,webp&folder=athenaeum/covers&timestamp=1792305252'`.
+Fixed in `lib/cloudinary.ts` `signUpload()`. Uploads now return 200.
+
+- **Cause: `max_file_size` was in the signature, and Cloudinary never signs it.** The reported string
+  has three parameters and no `max_file_size`, while the server signed four. Recomputing the rejected
+  signature locally reproduced it exactly **with** `max_file_size=5242880` and could not reproduce it
+  without — so the server's expectation and Cloudinary's could never agree, and every upload failed.
+- **The client was innocent.** `ImageUploader` already echoed every signed field, including
+  `max_file_size` — the fix landed in Unit 06. Adding the *missing* field would have made it worse:
+  it is the one field that must **not** be signed.
+- **Proof that Cloudinary excludes it** (probe against the live API, deliberate bad signature, no
+  asset created): an otherwise identical request yields the byte-identical `String to sign` with and
+  without `max_file_size`.
+- **Verified end-to-end after the fix:** real signed upload → **HTTP 200**, asset created in
+  `athenaeum/covers`, then destroyed with `uploader.destroy` so the account is left clean.
+- **Security posture, re-measured rather than assumed.** `folder` and `allowed_formats` **are**
+  enforced: a `.gif` payload under the signed whitelist is refused with
+  `Image file format gif not allowed`. `max_file_size` is **not**: a 1.9MB PNG uploaded with
+  `max_file_size=1024` returned **200**. So the size cap is a client-side guard plus account storage
+  limits — not something a crafted request can be stopped by.
+- **Follow-up (needs a decision, not code):** a signed **upload preset** per folder
+  (`athenaeum_covers`, `athenaeum_avatars`) is the only mechanism that pins `folder`,
+  `allowed_formats` and `max_file_size` server-side. It also requires switching the sign payload to
+  `timestamp` + `upload_preset`. That is an account change (Cloudinary console or Admin API), so it is
+  reported rather than done.
+- Comments in `cloudinary.ts`, `cloudinary-shared.ts`, `validators/upload.ts` and
+  `image-uploader.tsx` that asserted the opposite ("the client cannot widen `max_file_size`") were
+  corrected to match the measurements. `architecture.md` §Image upload contract and the
+  `api-contract.md` note were updated for the same reason.
+
 ## Completed
 
 ### Unit 20 — Landing Page Rebuild ✅ · `feat/20-landing-rebuild`
@@ -1573,8 +1606,10 @@ Verified: `setName: rs0`, primary elected, and a transaction commits.
   and lazily `await import("cloudinary")` for `signUpload` / `destroyAsset`. Merging them, or importing
   the server module from a Client Component, fails the build — a loud failure that prevents shipping
   `CLOUDINARY_API_SECRET` to the browser.
-- `signUpload()` signs `timestamp`, `folder`, `allowed_formats` **and `max_file_size`**, so the client
-  cannot widen the constraints. Upload endpoint is rate-limited to 30/hour per user per folder.
+- `signUpload()` signs `timestamp`, `folder` and `allowed_formats`, so the client cannot redirect the
+  write or widen the format whitelist. It originally also signed `max_file_size` — that broke every
+  upload; see the hotfix section above for the measurement. Upload endpoint is rate-limited to
+  30/hour per user per folder.
 - `POST /api/uploads/sign` — zod enum folder whitelist; `covers` requires staff (403 for members).
 - `DELETE /api/uploads` — staff may delete `athenaeum/covers/*` (detaching it from any referencing book
   first, with an audit entry); a member may delete **only their own current avatar**, verified against the
@@ -1615,7 +1650,9 @@ Recording these because they were invisible to `tsc`, `eslint` and `next build`:
   `withTransform` from the server module, dragging in the SDK and failing on `fs`. Fixed by the
   `cloudinary-shared` / `cloudinary` split above.
 - **Every upload would have failed with `Invalid Signature`** — `max_file_size` was signed but never sent.
-  Caught by the security-review agent, not by any compiler.
+  Caught by the security-review agent, not by any compiler. **Diagnosis later corrected:** sending it
+  was never the fix. Cloudinary excludes `max_file_size` from the string it signs, so it must be left
+  out of the signature entirely — see the hotfix section.
 - **A newly uploaded avatar was never persisted** — `onChange` only touched client state and the next
   server refresh clobbered it, leaving the API's avatar branch as dead code. Now calls `profileApi.update`.
 - **A revoked blob URL latched forever** — `preview` was set once and never cleared, so after the first
@@ -2105,6 +2142,10 @@ Everything else in the unit works. See the WIP section above for the narrowed ca
 concrete next step.
 
 ## Open Questions
+- **The upload size cap is client-side only.** A signed direct upload makes Cloudinary *ignore*
+  `max_file_size` (verified), so a crafted request can write an arbitrarily large file into
+  `athenaeum/covers`. Closing it needs a signed upload preset per folder — an account change, so it
+  needs the developer's go-ahead. See the hotfix section.
 - **`POST /api/maintenance/run` aborts its transaction intermittently** — the one open code
   defect. Everything else in Unit 16 is working and browser-verified. See the Unit 16 section.
 - **MongoDB is stopped and needs an elevated prompt to start.** See "needs the developer's
@@ -2467,7 +2508,14 @@ concrete next step.
 - **Never round-trip a source file through PowerShell `Get-Content -Raw` + `Set-Content`** — it reads the
   system ANSI codepage, corrupting every non-ASCII character and adding a BOM. (Also: `Get-Content`
   *display* of a UTF-8 file looks like mojibake even when the bytes are fine — check code points, not the
-  console.)
+console.)**
+- **A signature is valid only when it covers exactly what the other side signs — and "more signed" is
+  not "more secure", it is simply invalid.** Adding `max_file_size` to the signed payload made every
+  upload 401. No compiler, linter or read-through catches that: the *client* was already correct, so
+  the defect sat entirely in a security comment's assumption. Verify against the live API with a
+  deliberately wrong signature — the error echoes the string the server computed, which answers the
+  question outright. Then re-measure every claim that comment made, because one of them
+  (`max_file_size` cannot be widened) was false.
 
 ## Deviations from the Original Kit
 - **Next.js 16 / React 19 / Mongoose 9** instead of 15 / 19 / 8 — the scaffold and current registry

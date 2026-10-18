@@ -16,8 +16,10 @@ export const CLOUDINARY_API_BASE = "https://api.cloudinary.com/v1_1";
 /** Only these formats may be uploaded — a whitelist, never a blacklist. */
 export const ALLOWED_FORMATS = ["jpg", "jpeg", "png", "webp"] as const;
 
-/** Per-folder limits. The `maxFileSizeBytes` value is what gets *signed*, so the
- *  client cannot widen it. */
+/** Per-folder limits. `maxFileSizeBytes` travels with the upload but is **not** part
+ *  of the signature: Cloudinary excludes it from the string it signs and ignores it
+ *  on a signed direct upload, so the cap is a client-side guard plus an account
+ *  limit. Only `folder` and `allowed_formats` are tamper-proof. See `signUpload()`. */
 export const UPLOAD_LIMITS = {
   avatars: { maxSizeMB: 3, formats: ALLOWED_FORMATS },
   covers: { maxSizeMB: 5, formats: ALLOWED_FORMATS },

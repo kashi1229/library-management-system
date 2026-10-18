@@ -47,9 +47,24 @@ function config(): CloudinaryConfig {
  * Produce signed upload parameters for a folder.
  *
  * Every value the signature covers is returned so the client can echo them back
- * unchanged — Cloudinary rejects the upload otherwise. `max_file_size` and
- * `allowed_formats` are **signed**, so the client cannot widen them: a 10MB or
- * `.svg` upload is refused by Cloudinary even if the client-side check is bypassed.
+ * unchanged — Cloudinary rejects the upload otherwise. `folder` and
+ * `allowed_formats` are **signed**, so the client cannot redirect the write or
+ * widen the whitelist: verified against the live API, a `.gif` upload is refused
+ * with `Image file format gif not allowed` even though the browser check is bypassed.
+ *
+ * `max_file_size` is deliberately **not** signed. Cloudinary excludes it from the
+ * string it signs — verified: an otherwise identical request produces the same
+ * `String to sign` with and without it, so a signature built over it can never
+ * match and *every* upload fails with `Invalid Signature` (401). It is still
+ * returned and sent so the request documents the intended cap.
+ *
+ * Consequence worth knowing: a signed direct upload honours `folder` and
+ * `allowed_formats` but **ignores** `max_file_size` (verified: a 1.9MB PNG
+ * uploaded under a 1KB cap returns 200). The size cap is therefore enforced by
+ * `validateImageFile` on the client and by account storage limits, not by
+ * Cloudinary. Making it tamper-proof means a signed **upload preset**, where
+ * Cloudinary pins `folder`, `allowed_formats` and `max_file_size` itself — an
+ * account change, tracked as a follow-up in `progress-tracker.md`.
  */
 export async function signUpload(folder: CloudinaryFolder): Promise<SignedUploadParams> {
   const { cloudName, apiKey, apiSecret } = config();
@@ -64,7 +79,6 @@ export async function signUpload(folder: CloudinaryFolder): Promise<SignedUpload
       timestamp,
       folder: folderPath(folder),
       allowed_formats: limits.formats.join(","),
-      max_file_size: maxFileSizeBytes,
     },
     apiSecret,
   );

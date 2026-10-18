@@ -21,7 +21,9 @@ Roles: **P** public, **M** member+, **S** staff (librarian|admin), **A** admin.
 | DELETE | /uploads | S/M (owner-checked) | Body `{publicId}` remove asset |
 
 > **The avatar `url` is derived server-side** from the `publicId`; the client-supplied `url` is ignored.
-> Clients must echo back every signed field (including `max_file_size`) when POSTing to Cloudinary.
+> Clients must echo back every signed field when POSTing to Cloudinary. The signature covers
+> `timestamp`, `folder` and `allowed_formats` only — `maxFileSizeBytes` is returned for the request
+> but is **not** signed, and Cloudinary ignores it on a signed direct upload.
 
 ## Categories
 | GET | /categories | P | List with `bookCount` (active books only) |
