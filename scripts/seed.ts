@@ -28,8 +28,6 @@
  * privileged shortcut. A cover that cannot be fetched is simply omitted — the app
  * draws a typographic cover instead — and the book is reported as such.
  */
-import * as fs from "node:fs";
-
 /*
  * First import on purpose: it puts `.env.local` into `process.env` **before** the
  * app modules below are evaluated. `lib/db.ts` checks `MONGODB_URI` at import time,

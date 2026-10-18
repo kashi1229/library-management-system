@@ -160,6 +160,48 @@ The database moved to an Atlas cluster, so `scripts/seed.ts` builds a working li
   covers; `/api/public/stats` reports 12 books / 37 copies / 9 members; `/catalog` renders all ten
   sampled titles with **11/11 cover images loaded, 0 broken**, 0 console errors, 0 failed requests.
 
+## Investigation — "I can't borrow a book and my dashboard shows nothing"
+
+Reported after the move to Atlas. **No defect found; the cause was an empty database.** Recorded
+because the investigation is expensive to repeat and because it left one real, unfixed finding.
+
+- **Everything works, verified rather than assumed.** `POST /api/loans/issue` → **201** (nine times,
+  including seven in parallel against concurrent settings readers; the single failure was a correct
+  business rule, "already has this on loan"). The circulation desk's member and book pickers both
+  return and render their options. Amelia's dashboard shows the loan, its cover and a 14-day countdown
+  with **0 console errors**. A sweep of `/staff`, `/staff/books`, `/staff/circulation`, `/staff/members`,
+  `/staff/settings`, `/staff/reports`, `/dashboard`, `/my-loans`, `/catalog` and `/profile` was clean
+  apart from one `/staff` hydration warning that did not recur in seven follow-up loads — almost
+  certainly Turbopack recompiling mid-request while files were being edited.
+- **Why it *looked* broken: the Atlas database held no books.** `test@gmail.com` is the oldest user in
+  the collection, created **before** any book existed — the seed's dry run reported all twelve as
+  "would be created". Nothing to borrow, and a member dashboard with nothing on it is the correct
+  rendering of that. The seed (run earlier in this session) is what changed it.
+- **A session issued before the database switch cannot work**, and this is worth remembering: the JWT
+  carries a user id, `requireSession` re-reads it from the database, and a user that is not there is
+  treated as signed out. Tested with a forged valid token — every endpoint answers 401 and `/dashboard`
+  redirects cleanly to `/login?next=%2Fdashboard`. It is not a crash, and **signing in again is the
+  fix**.
+- **One real defect found, deliberately NOT changed.** `getSettings()` is called *inside* the
+  transaction by `issueLoanInSession` (`circulation.ts:175`) and `renewLoan` (`circulation.ts:512`).
+  `getSettings()` **upserts**, so that is a write inside an open transaction — which
+  `architecture.md` §Service layering says must not happen, and which `hooks.ts:105-122` documents as
+  the cause of the Unit 16 maintenance 500 ("Transaction has been aborted"). It is latent in
+  circulation because no other write to the singleton happens in those transactions, but it bites on a
+  **brand-new** database, where the insert races the dashboard's first read — which is precisely the
+  state this cluster was in. The fix is the one `hooks.ts` already uses: read policy before the
+  transaction opens. Not applied here because the reported symptom could not be reproduced, and
+  changing a core service on a hypothesis is how a working borrow path gets broken.
+- **Atlas's IP Access List is rejecting this machine intermittently.** Connections alternated between
+  succeeding and *"Could not connect to any servers… from an IP that isn't whitelisted"*, and the SRV
+  records resolve to non-conforming names on this network (`Server record does not share hostname with
+  parent URI`, which the driver rejects **before** authenticating). The running app holds an open pool
+  and so survives, but a fresh server start will fail. Worth fixing: whitelist the machine's IP, or
+  `0.0.0.0/0` for a dev cluster.
+- **Database left exactly as seeded.** The nine loans my tests created were deleted, every book's
+  `availableCopies` restored, and their notifications removed: 10 users, 12 books, 6 categories,
+  0 loans, 0 notifications.
+
 ## Completed
 
 ### Unit 20 — Landing Page Rebuild ✅ · `feat/20-landing-rebuild`
