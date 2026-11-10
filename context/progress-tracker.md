@@ -202,6 +202,47 @@ because the investigation is expensive to repeat and because it left one real, u
   `availableCopies` restored, and their notifications removed: 10 users, 12 books, 6 categories,
   0 loans, 0 notifications.
 
+## Investigation follow-up (10 Nov 2026) — same report, the real member defect found and fixed
+
+The report came back after the landing rebuild, so the whole borrow → dashboard chain was re-probed
+live against the current database with QA session cookies. Two things happened this time.
+
+- **The loan → dashboard chain is proven correct, not assumed.** `POST /api/loans/issue` → **201**;
+  the member's `GET /api/dashboard/member` answered immediately with `kpis.activeLoans: 1` and *The
+  Hobbit* on the "Currently reading" shelf; `GET /api/loans/mine` totalled 1; the server-rendered
+  `/dashboard` HTML itself contained "Currently reading" and the title. Same conclusion as the
+  original investigation, now with data behind every hop.
+- **The actual defect is a member dead-end on the detail page.** The "A copy is on the shelf" state in
+  `book-actions.tsx` rendered *"Borrow at the desk"* as a link to `/staff/circulation` for **every**
+  signed-in user. The proxy bounces a non-staff session off `/staff/*` with `307 → /dashboard`
+  (reproduced: `member opening /staff/circulation → 307 → /dashboard`), so a member who clicked it
+  round-tripped back to their correctly empty dashboard **having borrowed nothing** — which reads
+  exactly like the report. Issuing is desk-only by design, so the fix keeps that: the state is now
+  **role-aware** (`isStaff` prop, default `false` passed from the detail page). Staff keep the working
+  desk link; a member gets a non-navigating, muted informational panel — *"This copy is on the shelf.
+  Borrow it at the circulation desk — a librarian will issue it to you, and it then shows on your
+  dashboard with the due date."* — matching the prose convention the reserve refusals already use.
+  Spec 09 defines only Reserve/Wishlist/Share for this page, so no spec or contract file needed a
+  change and calling members could not self-issue was left untouched.
+- **Data-state traps that also produce this symptom (reported, not fixed — data operations):**
+  - The database holds one **dangling loan** `6ad4827c…` (status `returned`): its member and its book
+    were deleted directly in Mongo in an earlier session, so it resolves to placeholders forever. It
+    belongs to /my-loans History, where it competes with nothing; recommend deleting it (plus its
+    notification and audit rows) directly.
+  - A **returned** loan never shows on `/dashboard` — the dashboard shows *active* loans and *ready*
+    holds only (spec 17). A member whose borrow was issued and returned within seconds sees an empty
+    dashboard and History on `/my-loans` instead; that is correct behaviour, easy to misread.
+  - A **waiting** hold never shows on `/dashboard` either — only "Ready for pickup" appears there;
+    waiting position lives on `/reservations`.
+- **QA artifacts cleaned.** This session's reproduction loan was deleted along with its
+  `loan_issued` notification and `loan.issue` audit row, and The Hobbit was restored
+  (`availableCopies 9 → 10`, `borrowCount 1 → 0`): database back to 1 loan (the dangling one),
+  0 active. Probes live in the excluded `qa17/` folder.
+- **Verification:** `tsc --noEmit` and `next build` are clean, and `eslint` passes on the two changed
+  files. `npm run lint` still reports **3 pre-existing** `react/no-unescaped-entities` errors in
+  `src/components/features/marketing/library-quote.tsx`, committed by the landing rebuild and
+  untouched here per the no-side-scope rule.
+
 ## Completed
 
 ### Unit 20 — Landing Page Rebuild ✅ · `feat/20-landing-rebuild`

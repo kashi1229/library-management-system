@@ -176,7 +176,7 @@ export default async function BookDetailPage({ params }: Params) {
               queueLength={book.queueLength}
               className="mb-4"
             />
-            <BookActions book={book} signedIn={Boolean(session)} />
+            <BookActions book={book} signedIn={Boolean(session)} isStaff={isStaff} />
           </div>
 
           {book.description ? (

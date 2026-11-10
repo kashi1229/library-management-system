@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  ArrowLeftRight,
   Bookmark,
   BookmarkCheck,
   Check,
@@ -32,7 +33,14 @@ import type { CatalogBookDetail } from "@/types";
  *
  * - **A copy is on the shelf** → "Borrow at the desk". Reserving would be wrong: rule 5 only
  *   permits it when there is no effective copy, and a copy sitting there is a copy they can
- *   have today. The button links to the desk rather than dead-ending.
+ *   have today. **Staff keep a working link to the circulation desk.** A member gets the
+ *   same information as a sentence instead of the link, because issuing is a desk action
+ *   (`project-overview.md` member flow) and `/staff/circulation` is behind the middleware's
+ *   non-staff redirect to `/dashboard` — following it was a round trip that arrived with
+ *   nothing borrowed, which is exactly the "member borrowed from the catalog but the
+ *   dashboard shows nothing" report. No control at all is better than a control that
+ *   cannot work (the Unit 07 lesson), so the member's affordance is a statement of where
+ *   borrowing actually happens, never a navigation.
  * - **No copy, and they hold nothing** → "Reserve this book", plus the place they would get.
  *   A number is what makes joining a queue a decision rather than a leap of faith, and it
  *   comes from the server rather than being invented here.
@@ -54,10 +62,13 @@ import type { CatalogBookDetail } from "@/types";
 export function BookActions({
   book,
   signedIn,
+  isStaff = false,
   className,
 }: {
   book: CatalogBookDetail;
   signedIn: boolean;
+  /** Staff see a working link to the desk; members get the desk as information (see above). */
+  isStaff?: boolean;
   className?: string;
 }) {
   const router = useRouter();
@@ -191,12 +202,27 @@ export function BookActions({
               On loan to you
             </Button>
           ) : book.effectiveAvailable > 0 ? (
-            <Button asChild>
-              <Link href={ROUTES.staff.circulation}>
-                <Bookmark className="size-4" aria-hidden="true" />
-                Borrow at the desk
-              </Link>
-            </Button>
+            // The desk link is for the staff member browsing the catalog mid-shift; a member
+            // routed into /staff/circulation arrives back on their own dashboard having
+            // borrowed nothing, which reads as a broken borrow. See the doc comment above.
+            isStaff ? (
+              <Button asChild>
+                <Link href={ROUTES.staff.circulation}>
+                  <Bookmark className="size-4" aria-hidden="true" />
+                  Borrow at the desk
+                </Link>
+              </Button>
+            ) : (
+              <p className="flex items-start gap-1.5 rounded-lg border border-border bg-surface-muted px-4 py-3 text-small text-muted-foreground">
+                <ArrowLeftRight className="mt-0.5 size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                <span>
+                  This copy is on the shelf.{" "}
+                  <span className="font-medium text-foreground">Borrow it at the circulation desk</span>{" "}
+                   a librarian will issue it to you, and it then shows on your dashboard with the
+                  due date.
+                </span>
+              </p>
+            )
           ) : (
             <Button variant="accent" onClick={() => void reserve()}>
               <Bookmark className="size-4" aria-hidden="true" />
