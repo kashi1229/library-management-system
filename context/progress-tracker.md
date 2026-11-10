@@ -243,6 +243,31 @@ live against the current database with QA session cookies. Two things happened t
   `src/components/features/marketing/library-quote.tsx`, committed by the landing rebuild and
   untouched here per the no-side-scope rule.
 
+### Same day — same report on `/staff/reports/borrowing` — the report is correct, the data was wreckage
+
+Re-investigated with the same probe method. **No code defect; two findings, one real fix.**
+
+- **The borrowing report resolves real names correctly.** Proven live: with a QA loan issued through
+  the desk flow, `GET /api/reports/borrowing` returned the real row — *The Hobbit / test /
+  LIB-2026-0009* — the summary moved to `Loans issued=2, Returned=1` consistent with the rows, and
+  the `format=csv` export carried the same real values (spec 18's "export cannot disagree with the
+  screen" check). The QA loan was then cleaned in the same script: book counts restored
+  (`availableCopies 9 → 10`, `borrowCount 1 → 0`), loan, notification and audit row removed.
+- **The "Unknown title / Unknown member" row was the dangling loan, not a bug.** Its member
+  (Amelia Rahman) and book (Pride and Prejudice) were deleted directly in Mongo in an earlier
+  session — the app can never produce that state (`deleteBook` refuses while loan history exists),
+  so the placeholders are the honest rendering, matching the trail's "Unknown user" convention.
+  The audit log retained the only human-readable record of the pair:
+  *"Issued "Pride and Prejudice" to Amelia Rahman"*.
+- **Approved data cleanup applied.** With the developer's explicit choice ("Clean loan +
+  notifications"): the dangling loan `6ad4827c…` and its 2 orphaned notifications were deleted; the
+  loan's 2 audit rows were kept so the append-only trail survives (they read fine — the summary
+  text and the still-existing actor admin resolve). The loans collection now holds **0 loans**, the
+  borrowing report answers `total: 0` with an all-zero summary, and the CSV is header-only. Any
+  future borrow shows real names — proven live above.
+- Probes for this pass live in the excluded `qa17/` folder (`verify-borrowing-report.mjs`,
+  `probe-dangling-history.mjs`, `clean-dangling-loan.mjs`, `verify-report-final.mjs`).
+
 ## Completed
 
 ### Unit 20 — Landing Page Rebuild ✅ · `feat/20-landing-rebuild`
