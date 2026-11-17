@@ -4,26 +4,40 @@ Update this file after every meaningful implementation change.
 
 ## Current Phase
 - **Phase 1 — Foundation, backend, auth, shell, profile, catalog management, public catalog, members/team, circulation, fines, reservations, wishlist/reviews, notifications, dashboards, reports & audit.**
-  Units 01–17 complete and verified. **Unit 16 committed as WIP** (one known defect, see below).
-  **Unit 18 complete and verified.** Units 19 → 21 to go.
+  Units 01–18 complete and verified (Unit 16 committed as WIP with one known defect, see below).
+  Unit 19 (settings) shipped — see the settings hotfix sections above.
+  **Unit 20 (landing rebuild + project-wide polish) complete and verified.** Unit 21 remains.
 
 ## Current Goal
-- **Unit 18 (Reports, CSV & Audit Log) is complete.** Six reports, CSV export, a print view and
-  the admin audit register. `tsc`, `eslint` and `next build` are clean and all five routes are in
-  the build output. **100/100 API checks** against the live database.
-- Build Units 19 → 21 in dependency order (see `context/specs/00-build-plan.md`).
+- **Unit 20 (Landing Polish & Verification) is complete.** SEO routes, skip link, page
+  transitions, loading skeletons, lazy charts, styleguide removal, and a browser-verified
+  image/a11y/perf pass — **31/31 browser checks**, `eslint`/`npm test`/`next build` clean,
+  Lighthouse mobile A11y/Best-Practices/SEO **100** on landing and catalog. The one open
+  item from the spec's checklist is **Lighthouse mobile Performance ≥ 90** — measured
+  55–63 (landing) / 57 (catalog), with the cause and the concrete follow-up documented
+  in the Unit 20 polish section below.
+- **Unit 21 (seed, QA docs, deploy) is the remaining unit** (see `context/specs/00-build-plan.md`).
 - **Unit 16 still has one open defect** — `POST /api/maintenance/run` intermittently aborts its
   transaction. See the WIP section for the narrowed cause and the concrete next step. It does
   not block anything; Units 17 and 18 depend only on the lazy trigger, which works.
 
 ## Open — needs the developer's machine
 
-- **None.** MongoDB is running and both Units 17 and 18 are verified against it.
-- **Unit 16's maintenance defect is still open**, and still needs a decision rather than
-  access. See the WIP section.
-- **Unit 18's print view and responsive/dark passes were not run** — see its checklist. The
-  stylesheet and the `print:` utilities are written and correct by inspection; only a
-  print-media capture would close it.
+- **Rotate the Cloudinary API secret.** The real `CLOUDINARY_API_SECRET` (and cloud name)
+  were committed to `.env.example` at some point in git history. The file now carries
+  placeholders (fixed during Unit 20), but anything that once lived in the repo must be
+  treated as compromised: rotate the secret in the Cloudinary console and update
+  `.env.local` only.
+- **Lighthouse mobile Performance ≥ 90 is not met** — a decision about hydration scope,
+  not a quick fix. Measured 55–63 (landing) / 57 (catalog) on a warm production build.
+  A11y, Best Practices and SEO are 100 on both pages; the gap is entirely `total-blocking-time`
+  (framer-motion runtime + the landing's ~224KiB RSC flight payload under Lighthouse's
+  4×-CPU mobile throttling, which also starves the LCP paint). The next step, if the
+  target is required, is a below-fold lazy-hydration pass over the landing (defer
+  HowItWorks / PlatformHighlights / quote / CTA / back-to-top behind an IntersectionObserver
+  + `next/dynamic`, with reserved heights) and SSR-ing the catalog's first result page —
+  both are unit-sized changes with regression risk against verified units, so they are
+  reported rather than improvised. Details in the Unit 20 section.
 
 ## Hotfix — Cloudinary signed uploads returned 401 `Invalid Signature`
 
@@ -216,6 +230,145 @@ because the investigation is expensive to repeat and because it left one real, u
 - **Architecture Bento Grid (`platform-highlights.tsx`)**: 4-pillar showcase of transactional integrity, design system compliance, signed asset pipelines, and enterprise CSV reporting.
 - **Literary Quote & Trust CTA (`library-quote.tsx`, `cta-band.tsx`, `back-to-top.tsx`)**: Academic quotation, member benefit checklist, book spine silhouettes, and smooth scroll-to-top button.
 - `npm run lint` and `npm run build` pass with zero errors and zero warnings.
+
+### Unit 20 — Landing Polish & Verification ✅ · `feat/20-landing-polish`
+**Status: complete.** The polish half of spec 20, verified against the running app in a real
+browser (headless Chrome via `puppeteer-core`, harness at `Temp/opencode/qa20/`, excluded from
+git via `.git/info/exclude` like the `qa17/` harness before it): **31/31 browser checks**,
+`eslint` clean, `npm test` 29/29, `next build` clean, and the Impeccable detector clean over
+every changed file.
+
+#### What landed
+- **SEO/meta** — root `metadataBase` (from `NEXT_PUBLIC_APP_URL`) with OpenGraph + Twitter
+  cards, landing OG override, and the spec's two new metadata routes: `src/app/robots.ts`
+  (public site allowed, `/api/` + `/staff/` disallowed, sitemap named) and `src/app/sitemap.ts`
+  (`force-dynamic`, because the build has no database — the same lesson as `staff/layout.tsx` —
+  degrading to static routes on a database failure). `listCatalogSlugs()` was added to
+  `src/lib/services/books.ts` as a projection-only query, not a reuse of `listBooks()`.
+- **Skip-to-content** — one `SkipLink` in the root layout (so it covers auth and error pages
+  too), and every `<main>` shell standardised to `id="main"` + `tabIndex={-1}` (`AppShell`
+  renamed from `main-content`). Verified keyboard-first: Tab → skip link, Enter → focus on
+  `main`, next Tab lands in the nav, not the shell again.
+- **Page transitions** — per-route-group `template.tsx` in all five groups rendering a shared
+  `.page-enter` class. Deliberately **not** a root `template.tsx`: a root one would remount
+  `AppShell` on every navigation and reset the drawer/sidebar state. Keyframes live in
+  `globals.css` beside the other motion primitives.
+- **Loading states** — route-level skeletons for `(marketing)`, `(public)/catalog` and
+  `(public)/catalog/[slug]`, matching their real layouts so first paint does not shift.
+  Every surface's empty/error states already existed from earlier units.
+- **Performance** — recharts is dynamically imported in `staff-dashboard.tsx` with `ssr: false`
+  and a shared `ChartFrameSkeleton` fallback; `CHART_PLOT_HEIGHT = 260` was hoisted into
+  `chart-frame.tsx` so the skeleton and the plot agree on the height and nothing shifts.
+  Charts keep their fallback description "Last 30 days" as a client-side copy of
+  `SERIES_DAYS`, documented, because the chart services are `server-only`.
+- **Cleanup** — the `(styleguide)` route group is deleted (404 in the build route table),
+  `context/ui-context.md` documents the retirement and the transition implementation.
+  `.env.example` now carries Cloudinary **placeholders** — see the rotation note above.
+
+#### The carousel cover that never loaded — diagnosis and fix
+The browser pass flagged one new-arrivals `<img>` with `naturalWidth: 0` that appeared to have
+"picked w=3840 from the srcset". A targeted DOM probe (`qa20/probe3840.mjs`) found the real
+cause — **not bandwidth, not srcset**:
+- `next/image` generates the *fallback* `src` at the **largest** width in the candidate list
+  (`get-img-props.js` line 142–147), so every cover's `src` says `w=3840`; the browser still
+  requests the right srcset candidate. That number in the request log was a red herring.
+- The stuck cover was the **last card in the horizontal carousel**: `loading="lazy"` resolves
+  intersection **through clipping ancestors**, so an image clipped out by the
+  `overflow-x: auto` scrollport at `scrollLeft: 0` is never fetched until the user drags the
+  shelf — blank covers that pop in mid-drag.
+- **Fix:** `BookCover` gained an `eager` prop (mapped to `loading="eager"` — no preload
+  side-effects, unlike `priority`), used by the shelf. Seven small covers (~15KB each) is
+  cheap; a carousel that flashes empty while being dragged is not.
+- The shelf's `sizes` was also lying — `"(max-width: 640px) 45vw, 220px"` on cards that are
+  fixed `190px`/`220px`. Truthful fixed-pixel `sizes` removed the `vw` term, which re-enabled
+  the smaller srcset candidates: the shelf now requests `w=256` for every cover instead of
+  `w=384`, a net bandwidth reduction, and all 7/7 covers load.
+
+#### The a11y and perf findings from Lighthouse
+- **Catalog accessibility 98 → 100.** `heading-order` failed: card titles were `h3` directly
+  under an `h1` page header. `book-card.tsx`, `book-list-row.tsx` and `my-wishlist.tsx`
+  titles are now `h2` — correct in every usage context (catalog/wishlist sit under `h1`;
+  the related section and the landing shelf sit under an `h2`, where a same-level `h2` is
+  valid).
+- **Landing Performance 47 → 55–63 across runs.** The dominant cause was the hero copy
+  starting at `opacity: 0` in the SSR HTML and painting only after motion hydrated —
+  Lighthouse measured a **2.9s "element render delay"** on the LCP element, plus a 1.7s
+  inline blocking task. The hero entrance is now **CSS-driven** (`.hero-rise` keyframes +
+  inline `animation-delay` stagger; values are `motionTokens` slow/smooth/md/stagger spelled
+  out, because a CSS keyframe cannot import a token), so the copy paints at first paint,
+  before any JavaScript. Motion stays for the hover/tap micro-interactions. The reduced
+  motion blanket rule also collapses `animation-delay` now (a stagger delay would otherwise
+  leave hero copy invisible for its length under `prefers-reduced-motion`).
+- **Not met: Lighthouse mobile Performance ≥ 90** (spec's "Verify when done"). Best reading
+  63, later runs 55–59 (TBT on this laptop swings 0.9–3.0s run to run); catalog 57.
+  A11y/Best-Practices/SEO are **100 on both pages**; CLS is 0; FCP 1.0–1.3s. The remaining
+  gap is `total-blocking-time` — the framer-motion runtime plus the landing's ~224KiB RSC
+  flight payload under 4×-CPU throttling, which also starves the LCP paint (LCP waits for the
+  main thread to free, hence 4.0–4.4s). The catalog's LCP additionally waits for its
+  client-fetched result page (by Unit 09 design — results change with every keystroke;
+  the first six cards already get `priority`, the delay is the fetch chain, not lazy loading).
+  Closing the gap needs a below-fold lazy-hydration pass over the landing and SSR-ing the
+  catalog's first page of results — both unit-sized architecture changes, listed under
+  "Open" above rather than improvised at the end of a polish unit.
+
+#### Unit 20 — harness lessons
+- **"The image picked the biggest srcset candidate" was not the defect.** `next/image` always
+  writes its fallback `src` at the largest width for `fill` images; the browser still chooses
+  from `srcset`. Only when an image has *no* working srcset does the fallback get fetched.
+- **A lazy image inside a horizontal scroller never loads until scrolled into view
+  horizontally.** Chrome resolves lazy-loading intersection through clipping ancestors, and
+  the generous "near viewport" margin does not apply through a clipped container. Eager-load
+  anything a horizontal scrollport can clip out.
+- **A `vw` term in `sizes` removes srcset candidates below its smallest ratio** —
+  `getWidths()` filters candidates at `640px × smallestRatio`. For fixed-width slots, write
+  fixed pixels; it is both truthful and smaller.
+- **`getComputedStyle().animationDuration` returns the seconds literally** (`1e-05s` for
+  0.01ms) — assertions must parse it numerically, not string-match a formatting detail.
+- **Next renders robots.txt rules as `User-Agent`** with a capital A; the harness's
+  lowercase regex failed against correct output.
+- **Lighthouse run-to-run TBT on this laptop swings 0.9–3.0s under throttling** — a single
+  run is not a measurement; a warm second run and a range are. Also: the first run against a
+  freshly started `next start` measures a cold Atlas connection (3.1s TTFB) — warm the
+  server first.
+- **Lighthouse 13 dropped `largest-contentful-paint-element`'s details** — use the
+  `lcp-breakdown-insight` / `lcp-discovery-insight` audits for the element and its
+  TTFB / load / render-delay breakdown.
+
+#### Unit 20 — spec checklist, ticked against the running app
+- [x] Landing shows only real data and every link works.
+      *Stats, covers and categories come from `getPublicStats()`; hero search routes to the
+      catalog; cards link to detail pages (verified in the browser pass).*
+- [x] Hero motion is smooth and disabled for reduced motion.
+      *Reduced-motion pass: `page-enter`/`hero-rise` collapse to the 0.01ms blanket rule
+      (including the new stagger-delay collapse) and the hero still paints.*
+- [ ] Lighthouse (mobile) ≥ 90 Performance on landing and catalog.
+      ***Not met** — 55–63 / 57. A11y, Best Practices and SEO are 100 on both. Cause and
+      follow-up documented above and under "Open".*
+- [x] Keyboard-only walkthrough succeeds; skip link works.
+      *Skip link verified Tab → Enter → `#main`, next Tab into the nav; the carousel arrow
+      buttons and the shelf's ArrowLeft/ArrowRight are keyboard-operable. The
+      issue/return/reserve keyboard path was driven in its own units' passes (e.g. the
+      reservation radio group is driven with ArrowRight in the Unit 14 pass) and was not
+      re-run here.*
+- [x] No page lacks loading/empty/error states; 404 page styled.
+      *Route-level skeletons added for marketing, catalog and book detail; empty/error
+      states existed from earlier units and render in the browser pass.*
+- [x] Verified at 360, 768, 1280, 1920 px in light and dark.
+      *The browser pass sweeps all four widths in light (no horizontal scroll at any) and
+      captures 1280 in dark; the reduced-motion pass runs separately.*
+- [x] No TypeScript/ESLint/console errors · `npm run build` passes.
+      *`next build` clean (TypeScript included), `eslint` clean, zero console/page errors
+      and zero failed requests on landing, catalog and book detail in both themes.*
+
+#### Unit 20 — deliberately not done
+- **Below-fold lazy hydration on the landing.** The right instrument for the remaining
+  Performance gap, but it changes when sections mount and needs reserved heights to stay
+  CLS-0 — a unit of its own, not a tail-of-polish patch.
+- **SSR-first page of catalog results.** Would fix the catalog's LCP chain, but it changes
+  Unit 09's search-driven data flow (results are client-fetched so keystrokes do not fight
+  the server); needs its own design, not a quick `fallbackData` plaster.
+- **Print-media pass for Unit 18** remains open from that unit (needs a print capture;
+  the CSS was written and correct by inspection there).
 
 ### Unit 18 — Reports, CSV & Audit Log ✅ · `feat/18-reports-audit`
 **Status: complete.** 100/100 API checks against the live database; `tsc`, `eslint` and

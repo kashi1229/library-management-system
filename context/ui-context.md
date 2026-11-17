@@ -72,7 +72,14 @@ Scale: Hero `clamp(2.5rem, 6vw, 4.5rem)`; H1 `2.25rem`; H2 `1.75rem`; H3 `1.25re
   variants `fadeUp` / `stagger` / `scaleIn` / `slideIn` plus their `*Reduced` counterparts.
   Components must never hardcode a duration, easing or spring. Reduced-motion awareness comes from
   `useMotionVariants()` / `usePrefersReducedMotion()` in `src/hooks/use-motion-variants.ts`.
-- **Page transition:** fade + 8px rise. **Lists:** stagger children 40ms. **Cards:** hover lifts 2px + shadow-lift. **Buttons:** press scales to 0.98. **Dialogs/Sheets:** scale-in 0.97→1 / slide from edge. **Counters:** KPI numbers count up once on view. **Heart (wishlist):** spring pop + fill. **Bell:** subtle shake on new notification. **Skeletons:** soft shimmer. **Hero:** book covers float with slow, offset sine drift (transform only).
+- **Page transition:** fade + 8px rise — implemented as a `.page-enter` CSS animation (globals.css)
+  rendered by a per-route-group `template.tsx` ((auth), (marketing), (public), (member), staff), so the
+  app shell never re-mounts on navigation. **Hero entrance:** CSS too — `.hero-rise` keyframes
+  (globals.css) with inline `animation-delay` stagger, not motion variants: a variant starting at
+  `opacity: 0` is invisible in the SSR HTML and delays the LCP paint until hydration (measured ~2.9s
+  throttled); a CSS animation paints at first paint. The values inside the keyframe are the
+  `motionTokens` slow/smooth/md/stagger numbers spelled out — a CSS rule cannot import a token, so the
+  two files must be updated together if a token is retuned. **Lists:** stagger children 40ms. **Cards:** hover lifts 2px + shadow-lift. **Buttons:** press scales to 0.98. **Dialogs/Sheets:** scale-in 0.97→1 / slide from edge. **Counters:** KPI numbers count up once on view. **Heart (wishlist):** spring pop + fill. **Bell:** subtle shake on new notification. **Skeletons:** soft shimmer. **Hero:** book covers float with slow, offset sine drift (transform only).
 - Animation library is **`motion`** (the current name of framer-motion, v12+); import from `motion/react`, never `framer-motion`.
 - `prefers-reduced-motion`: disable transforms/drift; keep opacity fades ≤150ms.
 - Never animate more than 2 things competing for attention at once.
@@ -83,11 +90,14 @@ Scale: Hero `clamp(2.5rem, 6vw, 4.5rem)`; H1 `2.25rem`; H2 `1.75rem`; H3 `1.25re
 - Animated values must initialise to their **final** server value, then animate from the "from" state once mounted — so there is no zero-flash.
 
 ## Style Guide Route
-- The Unit 01 design system is proven at **`/styleguide`** (source: `src/app/(styleguide)/styleguide/`).
+- The Unit 01 design system was proven at **`/styleguide`** (source: `src/app/(styleguide)/styleguide/`).
 - A leading-underscore folder is a Next.js *private folder* and is excluded from routing, so `app/_styleguide/`
   would never have been reachable; the route group `(styleguide)` is used instead.
 - The page hard-404s when `NODE_ENV === "production"`, so it is compiled out of production builds.
-- Delete it when the design system is stable enough to retire, or keep it as living documentation.
+- **Retired in Unit 20 (spec 20 §Cleanup): the route group has been deleted.** The design system is
+  documented by `ui-context.md` and the shared components themselves; the spec listed the route for removal.
+  If a living style reference is wanted again, restore it from git history (`feat/20-landing-polish` keeps
+  the last version before the deletion).
 
 ## Component Conventions
 - **Buttons:** variants `default` (primary), `secondary` (surface-muted), `outline`, `ghost`, `accent`, `destructive`; sizes `sm/md/lg/icon` (`icon-sm`, `icon-lg` also available). Leading Lucide icon optional. **Every size keeps a ≥40px pointer target** — `sm` is `h-10`, not `h-9`.

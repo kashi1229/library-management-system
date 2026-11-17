@@ -35,7 +35,7 @@ export default async function MarketingLayout({ children }: { children: React.Re
         user={session ? { name: session.name, role: session.role } : null}
         libraryName={settings?.libraryName}
       />
-      <main id="main" className="flex-1">
+      <main id="main" tabIndex={-1} className="flex-1">
         {children}
       </main>
       <PublicFooter

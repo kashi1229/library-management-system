@@ -89,7 +89,8 @@ export function AppShell({
           {suspended ? <SuspendedBanner reason={user.suspendedReason} /> : null}
 
           <main
-            id="main-content"
+            id="main"
+            tabIndex={-1}
             className={cn(
               "flex-1 py-6 sm:py-8",
               // Leave room for the bottom tab bar on small member screens.

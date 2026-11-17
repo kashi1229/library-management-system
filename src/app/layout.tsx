@@ -3,9 +3,19 @@ import { fontVariables } from "@/lib/fonts";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { SkipLink } from "@/components/layout/skip-link";
 import "./globals.css";
 
+/**
+ * Every absolute URL the app publishes — canonical links, OpenGraph, the sitemap and
+ * robots — resolves against this. `NEXT_PUBLIC_APP_URL` is already documented in
+ * `.env.example`; the fallback is the dev server, so a missing variable degrades to a
+ * correct local origin rather than to a relative URL that crashes `new URL()`.
+ */
+const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: {
     default: "Athenaeum — Library Management System",
     template: "%s · Athenaeum",
@@ -13,6 +23,15 @@ export const metadata: Metadata = {
   description:
     "Athenaeum is a library management system for cataloguing, circulation, reservations, fines and reporting.",
   applicationName: "Athenaeum",
+  openGraph: {
+    type: "website",
+    siteName: "Athenaeum",
+    url: "/",
+    title: "Athenaeum — Library Management System",
+    description:
+      "A university library catalog, circulation desk, reservation queue, and fine ledger in one unified system.",
+  },
+  twitter: { card: "summary" },
 };
 
 export const viewport: Viewport = {
@@ -35,6 +54,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${fontVariables} h-full`}
     >
       <body className="flex min-h-full flex-col font-sans antialiased">
+        <SkipLink />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

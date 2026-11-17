@@ -51,9 +51,10 @@ export function BookListRow({
 
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h3 className="line-clamp-2 text-small leading-snug font-medium text-foreground group-hover:underline group-hover:underline-offset-2">
+            {/* h2 — see book-card.tsx: the row sits directly under the page's h1. */}
+            <h2 className="line-clamp-2 text-small leading-snug font-medium text-foreground group-hover:underline group-hover:underline-offset-2">
               {book.title}
-            </h3>
+            </h2>
             <span className="text-caption text-muted-foreground">{book.authors.join(", ")}</span>
           </div>
 

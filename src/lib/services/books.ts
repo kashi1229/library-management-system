@@ -408,6 +408,29 @@ export async function listCatalogBooksByIds(
 }
 
 /**
+ * Every active catalog book's slug and last-change time, for `app/sitemap.ts`.
+ *
+ * **A projection-only read, deliberately not `listBooks()`.** The sitemap needs slugs
+ * and an `updatedAt`; the catalog reader resolves covers, categories and member state
+ * per row, which is a per-slug `$lookup` on a route search engines crawl on a schedule.
+ * `updatedAt` is optional in the result because a sitemap entry is legal without a
+ * `lastModified` — omitting it is more honest than guessing.
+ */
+export async function listCatalogSlugs(): Promise<Array<{ slug: string; updatedAt?: Date }>> {
+  type CatalogSlugDoc = { slug: string; createdAt?: Date; updatedAt?: Date };
+
+  const docs = await Book.find({ status: "active" })
+    .select("slug createdAt updatedAt")
+    .sort({ updatedAt: -1 })
+    .lean<Array<CatalogSlugDoc>>();
+
+  return docs.map((doc) => ({
+    slug: doc.slug,
+    updatedAt: doc.updatedAt ?? doc.createdAt,
+  }));
+}
+
+/**
  * One catalog book by id, with `effectiveAvailable` — the same shape `listBooks` returns.
  *
  * Throws rather than returning a placeholder, because every caller wants the book: the

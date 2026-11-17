@@ -21,6 +21,18 @@ type BookCoverProps = {
   alt?: string;
   sizes?: string;
   priority?: boolean;
+  /**
+   * Load the cover without lazy deferral.
+   *
+   * `next/image` lazy-loads by default, but Chrome resolves a lazy image's
+   * intersection **through its clipping ancestors**: a cover placed beyond the
+   * right edge of an `overflow-x: auto` scroller (e.g. the landing carousel at
+   * scrollLeft 0) has zero viewport intersection and is never fetched until the
+   * user drags the shelf — leaving blank covers that pop in mid-drag. Small
+   * covers (~15KB at these sizes) are cheap to fetch eagerly; surfaces that
+   * clip horizontally should set this.
+   */
+  eager?: boolean;
 };
 
 /**
@@ -39,6 +51,7 @@ export function BookCover({
   alt,
   sizes = "(max-width: 640px) 45vw, (max-width: 1024px) 30vw, 220px",
   priority = false,
+  eager = false,
 }: BookCoverProps) {
   const resolved = resolveColor(categoryColor);
   const imageUrl = url?.trim() || cloudinaryUrl(publicId, { width, height: Math.round(width * 1.5) });
@@ -58,6 +71,7 @@ export function BookCover({
           fill
           sizes={sizes}
           priority={priority}
+          loading={eager ? "eager" : undefined}
           /*
            * Images are natively draggable, and the browser will happily start dragging the
            * image file — which fires `pointercancel`, so any pointer-based interaction the

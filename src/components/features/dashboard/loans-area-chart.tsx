@@ -16,6 +16,7 @@ import type { DashboardDayPoint } from "@/types";
 import { useChartTokens } from "@/hooks/use-chart-tokens";
 import { usePrefersReducedMotion } from "@/hooks/use-motion-variants";
 import {
+  CHART_PLOT_HEIGHT as PLOT_HEIGHT,
   ChartEmpty,
   ChartFrame,
   ChartSkeleton,
@@ -23,8 +24,6 @@ import {
   GRID_STROKE_OPACITY,
   chartAxisProps,
 } from "@/components/features/dashboard/chart-frame";
-
-const PLOT_HEIGHT = 260;
 
 /**
  * Loans per day over the configured window.

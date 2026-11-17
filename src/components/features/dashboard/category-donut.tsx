@@ -8,13 +8,12 @@ import type { DashboardCategoryShare } from "@/types";
 import { categoryColorValue, useChartTokens } from "@/hooks/use-chart-tokens";
 import { usePrefersReducedMotion } from "@/hooks/use-motion-variants";
 import {
+  CHART_PLOT_HEIGHT as PLOT_HEIGHT,
   ChartEmpty,
   ChartFrame,
   ChartSkeleton,
   ChartTooltip,
 } from "@/components/features/dashboard/chart-frame";
-
-const PLOT_HEIGHT = 260;
 
 /** Enough rows for eight categories plus headroom; a legend that scrolls hides the smallest slice. */
 const MAX_LEGEND_ROWS = 8;

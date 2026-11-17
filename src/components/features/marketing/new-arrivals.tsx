@@ -245,7 +245,8 @@ function ShelfCard({ book }: { book: CatalogBook }) {
             author={book.authors[0]}
             categoryColor={book.category.color}
             width={340}
-            sizes="(max-width: 640px) 45vw, 220px"
+            sizes="(max-width: 640px) 190px, 220px"
+            eager
             className="rounded-none border-b border-border/80 transition-transform duration-300 group-hover:scale-[1.02]"
           />
 

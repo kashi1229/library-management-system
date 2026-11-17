@@ -12,12 +12,40 @@ import {
   Users,
 } from "lucide-react";
 import type { StaffDashboard } from "@/types";
-import { LoansAreaChart } from "@/components/features/dashboard/loans-area-chart";
-import { CategoryDonut } from "@/components/features/dashboard/category-donut";
+import dynamic from "next/dynamic";
 import { TopBooksBars } from "@/components/features/dashboard/top-books-bars";
 import { ActivityFeed } from "@/components/features/dashboard/activity-feed";
 import { LowStockList } from "@/components/features/dashboard/low-stock-list";
 import { DueTodayList } from "@/components/features/dashboard/due-today-list";
+import { CHART_PLOT_HEIGHT, ChartFrameSkeleton } from "@/components/features/dashboard/chart-frame";
+
+/**
+ * recharts arrives lazily (spec 20 performance checklist): the two SVG charts load as
+ * their own chunks after hydration instead of riding the dashboard's first paint, and
+ * the fallback is the same frame the real chart renders — same title, same
+ * `CHART_PLOT_HEIGHT` body — so the swap does not shift the page. `ssr: false` on
+ * purpose: `ResponsiveContainer` cannot measure a width on the server, and the charts'
+ * own token hook already paints a skeleton until the cascade is measurable.
+ *
+ * `TopBooksBars` stays eager on purpose — it is HTML, carries no recharts, and is part
+ * of the page's first read.
+ */
+const LoansAreaChart = dynamic(
+  () => import("@/components/features/dashboard/loans-area-chart").then((m) => m.LoansAreaChart),
+  {
+    ssr: false,
+    loading: () => (
+      <ChartFrameSkeleton title="Loans per day" description="Last 30 days" height={CHART_PLOT_HEIGHT} />
+    ),
+  },
+);
+const CategoryDonut = dynamic(
+  () => import("@/components/features/dashboard/category-donut").then((m) => m.CategoryDonut),
+  {
+    ssr: false,
+    loading: () => <ChartFrameSkeleton title="Loans by category" height={CHART_PLOT_HEIGHT} />,
+  },
+);
 
 /**
  * The staff dashboard body.

@@ -28,7 +28,11 @@ export function AuthLayout({
   return (
     <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
       {/* ------------------------------- Form panel ------------------------------ */}
-      <main className={cn("flex flex-col px-5 py-8 sm:px-8 lg:px-12 lg:py-12", className)}>
+      <main
+        id="main"
+        tabIndex={-1}
+        className={cn("flex flex-col px-5 py-8 sm:px-8 lg:px-12 lg:py-12", className)}
+      >
         <header className="flex items-center justify-between gap-4">
           <Logo markOnly className="lg:hidden" />
           <div className="hidden lg:block" />

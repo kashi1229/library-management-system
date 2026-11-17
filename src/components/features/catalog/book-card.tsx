@@ -85,9 +85,17 @@ export function BookCard({
         </div>
 
         <div className="flex flex-1 flex-col gap-1.5 p-3.5">
-          <h3 className="line-clamp-2 text-small leading-snug font-medium text-pretty text-foreground group-hover:underline group-hover:underline-offset-2">
+          {/*
+            h2, not h3: the card is used directly under an `h1` page header
+            (catalog, wishlist) and under an `h2` section heading (related,
+            shelf). In both cases the title belongs one level up — an `h3`
+            after an `h1` is the "heading elements are not in a
+            sequentially-descending order" a11y failure Lighthouse flags on
+            the catalog.
+          */}
+          <h2 className="line-clamp-2 text-small leading-snug font-medium text-pretty text-foreground group-hover:underline group-hover:underline-offset-2">
             {book.title}
-          </h3>
+          </h2>
           <p className="line-clamp-1 text-caption text-muted-foreground">{book.authors.join(", ")}</p>
 
           <div className="mt-auto pt-1">

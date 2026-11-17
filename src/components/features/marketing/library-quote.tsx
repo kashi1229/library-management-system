@@ -92,7 +92,7 @@ export function LibraryQuote() {
               className="font-display text-[8rem] sm:text-[10rem] md:text-[12rem] font-bold leading-none text-accent/20 dark:text-accent/15 select-none"
               style={{ lineHeight: 0.8 }}
             >
-              "
+              &ldquo;
             </span>
             <span
               aria-hidden="true"
@@ -112,9 +112,9 @@ export function LibraryQuote() {
           transition={{ duration: reduced ? 0.15 : 0.7, delay: reduced ? 0 : 0.15, ease: [0.22, 1, 0.36, 1] }}
           className="font-display text-2xl sm:text-3xl md:text-4xl font-normal leading-[1.3] tracking-[-0.01em] text-foreground text-balance"
         >
-          "The library is not a passive warehouse for the storage of books. It is the
+          &ldquo;The library is not a passive warehouse for the storage of books. It is the
           active heart of scholarship — an instrument of discovery, intellectual freedom,
-          and quiet community."
+          and quiet community.&rdquo;
         </motion.blockquote>
 
         <motion.div

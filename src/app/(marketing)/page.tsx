@@ -17,6 +17,14 @@ export const metadata: Metadata = {
   title: "Athenaeum — Academic Library Management System",
   description:
     "A university library catalog, circulation desk, reservation queue, and fine ledger in one unified system. Search, borrow, reserve, and return with effortless grace.",
+  /** The root template's `title` does not flow into `og:title` — OpenGraph is its own
+   *  namespace, so the landing repeats itself here rather than publishing the wrong
+   *  headline in a share preview. */
+  openGraph: {
+    title: "Athenaeum — Academic Library Management System",
+    description:
+      "A university library catalog, circulation desk, reservation queue, and fine ledger in one unified system.",
+  },
 };
 
 const HERO_COVERS = 6;

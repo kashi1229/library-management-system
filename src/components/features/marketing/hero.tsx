@@ -1,18 +1,35 @@
 "use client";
 
 import Link from "next/link";
-import { motion, type Variants } from "motion/react";
+import { motion } from "motion/react";
 import { ArrowRight, BookMarked, CheckCircle2, Clock, UserPlus } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { CoverStack } from "@/components/features/marketing/cover-stack";
 import { HeroSearch } from "@/components/features/marketing/hero-search";
 import { LandingAtmosphere } from "@/components/features/marketing/landing-atmosphere";
-import { motionTokens, transitions } from "@/lib/motion";
 import { usePrefersReducedMotion } from "@/hooks/use-motion-variants";
 import { ROUTES } from "@/lib/constants";
 import type { CatalogBook } from "@/types";
 
 const HEADLINE = ["Every", "story,", "within", "reach."];
+
+/*
+ * Stagger schedule for the `.hero-rise` entrances, in ms. It mirrors the old
+ * motion container's `delayChildren: 0.04 / staggerChildren: 0.08` and the
+ * headline's per-word `index * 0.06` — the same choreography, moved to CSS so
+ * it runs at first paint instead of at hydration. See `.hero-rise` in
+ * globals.css for why the entrance is not a motion variant.
+ */
+const STAGGER = {
+  badge: 40,
+  wordStart: 100,
+  wordStep: 60,
+  subcopy: 340,
+  search: 400,
+  cta: 460,
+  pillars: 520,
+  covers: 260,
+} as const;
 
 const PILLARS = [
   { icon: CheckCircle2, label: "Real-time Availability" },
@@ -39,37 +56,17 @@ export function Hero({
 }) {
   const reduced = usePrefersReducedMotion();
 
-  const container: Variants = {
-    hidden: {},
-    visible: {
-      transition: reduced
-        ? { staggerChildren: 0, delayChildren: 0 }
-        : { staggerChildren: 0.08, delayChildren: 0.04 },
-    },
-  };
-
-  const rise: Variants = {
-    hidden: { opacity: 0, y: reduced ? 0 : motionTokens.distance.md },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: reduced ? transitions.fast : transitions.slow,
-    },
-  };
-
   return (
     <section className="relative isolate overflow-hidden border-b border-border">
       <LandingAtmosphere />
 
-      <motion.div
-        className="container-page grid items-center gap-12 py-16 sm:py-20 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:gap-14 lg:py-24"
-        variants={container}
-        initial="hidden"
-        animate="visible"
-      >
+      <div className="container-page grid items-center gap-12 py-16 sm:py-20 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:gap-14 lg:py-24">
         <div className="min-w-0">
           {/* Live Campus Circulation Indicator */}
-          <motion.div variants={rise} className="inline-flex items-center gap-2">
+          <div
+            className="hero-rise inline-flex items-center gap-2"
+            style={{ animationDelay: `${STAGGER.badge}ms` }}
+          >
             <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-surface/85 px-3.5 py-1.5 text-caption font-medium tracking-wide text-foreground shadow-sm backdrop-blur-md">
               <span className="relative flex size-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
@@ -79,7 +76,7 @@ export function Hero({
               <span className="text-border">|</span>
               <span className="font-semibold text-accent-ink">Campus Active</span>
             </span>
-          </motion.div>
+          </div>
 
           {/* Master Fraunces Headline */}
           <h1 className="mt-6 font-display text-hero font-semibold leading-[1.04] tracking-[-0.03em] text-balance text-foreground">
@@ -88,41 +85,41 @@ export function Hero({
                 key={word}
                 className="inline-block overflow-hidden pb-[0.12em] align-bottom"
               >
-                <motion.span
-                  className="inline-block"
-                  variants={rise}
-                  transition={
-                    reduced
-                      ? transitions.fast
-                      : { ...transitions.slow, delay: index * 0.06 }
-                  }
+                <span
+                  className="hero-rise inline-block"
+                  style={{
+                    animationDelay: `${STAGGER.wordStart + index * STAGGER.wordStep}ms`,
+                  }}
                 >
                   {word}
                   {index < HEADLINE.length - 1 ? "\u00A0" : ""}
-                </motion.span>
+                </span>
               </span>
             ))}
           </h1>
 
           {/* Editorial Subcopy */}
-          <motion.p
-            variants={rise}
-            className="mt-6 max-w-xl text-pretty text-body text-muted-foreground md:text-lg"
+          <p
+            className="hero-rise mt-6 max-w-xl text-pretty text-body text-muted-foreground md:text-lg"
+            style={{ animationDelay: `${STAGGER.subcopy}ms` }}
           >
             A college library catalog, circulation desk, reservation queue, and fine
             ledger in one cohesive workspace. Search physical stacks, place smart holds,
             and manage reading lists effortlessly.
-          </motion.p>
+          </p>
 
           {/* Interactive Catalog Combobox */}
-          <motion.div variants={rise} className="mt-8">
+          <div
+            className="hero-rise mt-8"
+            style={{ animationDelay: `${STAGGER.search}ms` }}
+          >
             <HeroSearch />
-          </motion.div>
+          </div>
 
-          {/* Action CTAs */}
-          <motion.div
-            variants={rise}
-            className="mt-8 flex flex-col gap-3.5 sm:flex-row sm:items-center"
+          {/* Action CTAs — the entrance is CSS; motion stays for the tactile hover. */}
+          <div
+            className="hero-rise mt-8 flex flex-col gap-3.5 sm:flex-row sm:items-center"
+            style={{ animationDelay: `${STAGGER.cta}ms` }}
           >
             <motion.div
               whileHover={reduced ? undefined : { y: -2 }}
@@ -157,12 +154,12 @@ export function Hero({
                 Create member account
               </Link>
             </motion.div>
-          </motion.div>
+          </div>
 
           {/* Key Assurance Badges */}
-          <motion.div
-            variants={rise}
-            className="mt-8 flex flex-wrap items-center gap-y-2 gap-x-6 border-t border-border/80 pt-5 text-caption text-muted-foreground"
+          <div
+            className="hero-rise mt-8 flex flex-wrap items-center gap-y-2 gap-x-6 border-t border-border/80 pt-5 text-caption text-muted-foreground"
+            style={{ animationDelay: `${STAGGER.pillars}ms` }}
           >
             {PILLARS.map((pillar) => (
               <span key={pillar.label} className="inline-flex items-center gap-1.5 font-medium">
@@ -170,18 +167,17 @@ export function Hero({
                 <span>{pillar.label}</span>
               </span>
             ))}
-          </motion.div>
+          </div>
         </div>
 
         {/* 3D Physical Book Cluster */}
-        <motion.div
-          variants={rise}
-          className="min-w-0 lg:ps-4"
-          transition={reduced ? transitions.fast : { duration: 0.6 }}
+        <div
+          className="hero-rise min-w-0 lg:ps-4"
+          style={{ animationDelay: `${STAGGER.covers}ms` }}
         >
           <CoverStack books={covers} />
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
     </section>
   );
 }

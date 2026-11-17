@@ -394,6 +394,61 @@
   animation: draw-line 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.75s forwards;
 }
 
+/*
+ * Page transition (ui-context.md §Motion Language: fade + 8px rise, base 250ms).
+ *
+ * Each route group's `template.tsx` renders a `.page-enter` wrapper, so the animation
+ * runs on every navigation while the shell above it stays mounted. Animating
+ * opacity/transform only, per the motion language; under reduced motion the blanket
+ * rule below collapses it to a single frame, which is the same treatment every other
+ * opacity transition here gets.
+ */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: page-enter 250ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * The hero's entrance, CSS-driven instead of motion-driven.
+ *
+ * **Why not motion variants for the hero copy.** A motion variant starting at
+ * `opacity: 0` is invisible in the SSR HTML and only paints after React
+ * hydrates — on a throttled mobile CPU that measured as a ~2.9s "element
+ * render delay" on the LCP element in Lighthouse, because the browser waits
+ * for a half-megabyte of JavaScript to decide that the headline exists. A CSS
+ * animation starts at the first paint, before any JavaScript runs, and the
+ * page looks identical: same 450ms, same smooth easing, same 16px rise, same
+ * stagger — the values are the `motionTokens` `slow` / `smooth` / `md` / section
+ * stagger spelled out, because a CSS keyframe cannot import a token.
+ *
+ * `animation-fill-mode: both` keeps the element at its from-state (hidden) until
+ * its stagger slot starts, so the words still rise one after another.
+ */
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hero-rise {
+  animation: hero-rise 450ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /*
    * Drawn instantly rather than not at all. The line carries meaning — it is what says
@@ -426,6 +481,9 @@
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    /* Stagger delays would leave hero copy invisible for their length; with the
+       duration collapsed the reveal should simply be instant. */
+    animation-delay: 0s !important;
     transition-duration: 150ms !important;
     transition-property: opacity, background-color, color, border-color !important;
   }

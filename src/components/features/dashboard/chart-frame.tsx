@@ -82,6 +82,40 @@ export function ChartSkeleton({ height, label }: { height: number; label: string
 }
 
 /**
+ * The plot height both recharts frames render at — shared here so a chart and the
+ * fallback that stands in for it cannot disagree. `loans-area-chart.tsx` and
+ * `category-donut.tsx` import this as their `PLOT_HEIGHT`.
+ */
+export const CHART_PLOT_HEIGHT = 260;
+
+/**
+ * Frame-shaped fallback for a chart whose chunk is still loading (spec 20: recharts
+ * is dynamically imported, so its frame paints a beat after the KPI cards).
+ *
+ * **Same title, same height, same shell as the real frame** — the whole point is that
+ * the swap is invisible. The body is pinned by `ChartFrame`'s `minHeight`, so only the
+ * description line can differ; the loans-per-day fallback carries the real window
+ * (`SERIES_DAYS = 30` in `services/dashboard.ts` — the module is `server-only`, so the
+ * client copy is a documented constant, not an import). If the window ever becomes
+ * configurable, thread the value through the dashboard payload instead.
+ */
+export function ChartFrameSkeleton({
+  title,
+  description,
+  height,
+}: {
+  title: string;
+  description?: string;
+  height: number;
+}) {
+  return (
+    <ChartFrame title={title} description={description} height={height}>
+      <ChartSkeleton height={height} label={`Loading the ${title.toLowerCase()} chart`} />
+    </ChartFrame>
+  );
+}
+
+/**
  * The "no data" panel a chart shows instead of an empty axis.
  *
  * **A drawn, labelled, axis-shaped void is worse than a sentence.** A reader who sees an empty

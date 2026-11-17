@@ -203,9 +203,10 @@ function WishlistCard({
         </div>
 
         <div className="flex flex-1 flex-col gap-1.5 p-3.5">
-          <h3 className="line-clamp-2 text-small leading-snug font-medium text-pretty text-foreground group-hover:underline group-hover:underline-offset-2">
+          {/* h2 — see book-card.tsx: the card sits directly under the page's h1. */}
+          <h2 className="line-clamp-2 text-small leading-snug font-medium text-pretty text-foreground group-hover:underline group-hover:underline-offset-2">
             {book.title}
-          </h3>
+          </h2>
           <p className="line-clamp-1 text-caption text-muted-foreground">{book.authors.join(", ")}</p>
           <div className="mt-auto pt-1">
             <StarRating value={book.ratingAvg} count={book.ratingCount} size="sm" showValue={false} />
